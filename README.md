@@ -47,8 +47,8 @@ In the viewer:
 - Press `Enter` to inspect the row in a popup, then use `Tab` / `Shift+Tab` to cycle columns.
 - In row inspect mode, `1..9` also applies quick-label annotations.
 - Press `a` to annotate the current row with any label (new labels are added automatically).
-- Press `t` to set/switch the active annotation task, then open task label mode.
-- In task label mode, use `Enter` to add labels and `Ctrl+N` / `Ctrl+P` to switch tasks.
+- Press `t` to open task label mode (shows your current tasks immediately).
+- In task label mode, use `Enter` to add labels, type `task <name>` to create/switch tasks, and `Tab` / `Shift+Tab` to switch tasks.
 - Sorting: `s` toggles sort on the focused column.
 - Columns: `c` hides current column, `C` restores all columns.
 - Reset view state: `r`.

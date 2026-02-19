@@ -40,9 +40,9 @@ r: reset filter/sort/columns
 [b]Annotations[/b]
 1..9: apply quick label to focused row
 a: annotate focused row with typed label
-t: set/switch task, then open task label mode
+t: open task label mode
 In inspect modal, 1..9 also annotate current row
-In task label mode: Enter add label, Ctrl+N/P switch tasks
+In task label mode: Enter add label, `task <name>` to add/switch task, Tab/Shift+Tab switch tasks
 
 [b]Commands[/b]
 row <index>
@@ -412,8 +412,8 @@ class TaskLabelModal(ModalScreen[None]):
     BINDINGS = [
         Binding("escape", "close", "Close"),
         Binding("q", "close", "Close"),
-        Binding("ctrl+n", "next_task", "Next Task"),
-        Binding("ctrl+p", "previous_task", "Prev Task"),
+        Binding("tab,right", "next_task", "Next Task"),
+        Binding("shift+tab,left", "previous_task", "Prev Task"),
         Binding("ctrl+l", "focus_input", "Add Label"),
     ]
 
@@ -435,11 +435,11 @@ class TaskLabelModal(ModalScreen[None]):
             yield Static("", id="task_mode_labels")
             yield Input(
                 value="",
-                placeholder="Add label and press Enter",
+                placeholder="Label or command: task <name>",
                 id="task_mode_add_input",
             )
             yield Static(
-                "Enter: add label | Ctrl+N/P: switch task | Esc/q: close",
+                "Enter: add label | task <name>: create/switch task | Tab/Shift+Tab: switch task | Esc/q: close",
                 id="task_mode_hint",
             )
 
@@ -450,10 +450,23 @@ class TaskLabelModal(ModalScreen[None]):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "task_mode_add_input":
             return
-        label = event.value.strip()
-        if not label:
+        raw = event.value.strip()
+        if not raw:
             return
-        result = self._on_add_label(label)
+
+        lowered = raw.casefold()
+        if lowered.startswith("task "):
+            next_task = raw[5:].strip()
+            if not next_task:
+                self.notify("Usage: task <name>")
+                return
+            if self._on_switch_task(next_task):
+                event.input.value = ""
+                self._refresh_content()
+                self.notify(f"Active task set to '{next_task}'.")
+            return
+
+        result = self._on_add_label(raw)
         if result is None:
             return
         normalized_label, created, hotkey = result
@@ -516,7 +529,7 @@ class TaskLabelModal(ModalScreen[None]):
             lines.append("Labels without 1..9 quick keys can still be used via `a` or `:annotate`.")
 
         self.query_one("#task_mode_title", Static).update(f"Task Label Mode | active: {active_task}")
-        self.query_one("#task_mode_tasks", Static).update(f"Tasks (Ctrl+N/P): {tasks_line}")
+        self.query_one("#task_mode_tasks", Static).update(f"Tasks (Tab/Shift+Tab): {tasks_line}")
         self.query_one("#task_mode_labels", Static).update("\n".join(lines))
 
     CSS = """
@@ -685,11 +698,7 @@ class DataViewerApp(App[None]):
         if not self.annotation_store:
             self.notify("Annotation store is not configured.", severity="warning")
             return
-        self._open_command_modal(
-            mode="task",
-            value=self.annotation_store.active_task_type(),
-            placeholder="preference",
-        )
+        self._open_task_mode()
 
     def action_show_help(self) -> None:
         self.push_screen(HelpModal())

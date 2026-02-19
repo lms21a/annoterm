@@ -167,8 +167,29 @@ async def test_t_key_opens_task_mode_and_adds_task_scoped_label(tmp_path: Path) 
     app = DataViewerApp(adapter=adapter, load_rows=2, annotation_store=store)
     async with app.run_test() as pilot:
         await pilot.press("t")
-        assert app.screen_stack[-1].__class__.__name__ == "CommandInputModal"
-        await pilot.press("c", "l", "a", "s", "s", "i", "f", "i", "c", "a", "t", "i", "o", "n", "enter")
+        assert app.screen_stack[-1].__class__.__name__ == "TaskLabelModal"
+        await pilot.press(
+            "t",
+            "a",
+            "s",
+            "k",
+            " ",
+            "c",
+            "l",
+            "a",
+            "s",
+            "s",
+            "i",
+            "f",
+            "i",
+            "c",
+            "a",
+            "t",
+            "i",
+            "o",
+            "n",
+            "enter",
+        )
         assert store.active_task_type() == "classification"
         assert app.screen_stack[-1].__class__.__name__ == "TaskLabelModal"
 
@@ -176,6 +197,6 @@ async def test_t_key_opens_task_mode_and_adds_task_scoped_label(tmp_path: Path) 
         assert store.labels() == ["entity-person"]
         assert store.quick_label_for_key("1") == "entity-person"
 
-        await pilot.press("ctrl+n")
+        await pilot.press("tab")
         assert store.active_task_type() == "preference"
         assert store.labels() == ["good"]
