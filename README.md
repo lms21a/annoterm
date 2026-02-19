@@ -44,10 +44,12 @@ In the viewer:
 - Press `?` for an on-screen help modal with shortcuts and command reference.
 - Navigation keys: `j/k` (up/down), `ctrl+d/u` (page), `g/G` (top/bottom).
 - Press `Enter` to inspect the row in a popup, then use `Tab` / `Shift+Tab` to cycle columns.
+- In row inspect mode, `1..9` also applies quick-label annotations.
 - Sorting: `s` toggles sort on the focused column.
 - Columns: `c` hides current column, `C` restores all columns.
 - Reset view state: `r`.
 - Filter bar: `/` then enter expression like `score >= 0.6 and text contains "beta"`.
+- Quick column search: `f` opens a `contains` filter pre-filled for the currently selected column.
 - `/` and `:` open a centered popup input modal so typing stays visible even in tmux.
 - Command bar: `:` then run commands such as:
   - `row 1200`

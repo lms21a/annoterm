@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shlex
-from typing import Any
+from typing import Any, Callable
 
 import orjson
 from textual.app import App, ComposeResult
@@ -30,6 +30,7 @@ Enter: inspect row (Tab / Shift+Tab to move columns)
 
 [b]View Controls[/b]
 /: open filter input
+f: quick contains filter for current column
 : open command input
 s: sort current column (asc -> desc -> off)
 c: hide current column
@@ -38,6 +39,7 @@ r: reset filter/sort/columns
 
 [b]Annotations[/b]
 1..9: apply quick label to focused row
+In inspect modal, 1..9 also annotate current row
 
 [b]Commands[/b]
 row <index>
@@ -115,6 +117,15 @@ class RowInspectModal(ModalScreen[None]):
         Binding("shift+tab,left", "previous_column", "Prev Column", show=False, priority=True),
         Binding("home", "first_column", "First Column", show=False, priority=True),
         Binding("end", "last_column", "Last Column", show=False, priority=True),
+        Binding("1", "apply_label_1", "Label 1", show=False, priority=True),
+        Binding("2", "apply_label_2", "Label 2", show=False, priority=True),
+        Binding("3", "apply_label_3", "Label 3", show=False, priority=True),
+        Binding("4", "apply_label_4", "Label 4", show=False, priority=True),
+        Binding("5", "apply_label_5", "Label 5", show=False, priority=True),
+        Binding("6", "apply_label_6", "Label 6", show=False, priority=True),
+        Binding("7", "apply_label_7", "Label 7", show=False, priority=True),
+        Binding("8", "apply_label_8", "Label 8", show=False, priority=True),
+        Binding("9", "apply_label_9", "Label 9", show=False, priority=True),
     ]
 
     def __init__(
@@ -122,9 +133,13 @@ class RowInspectModal(ModalScreen[None]):
         row: RowRecord,
         columns: list[str],
         focused_column: str | None = None,
+        quick_label_map: dict[str, str] | None = None,
+        on_apply_label: Callable[[str], bool] | None = None,
     ) -> None:
         super().__init__()
         self._row = row
+        self._quick_label_map = dict(quick_label_map or {})
+        self._on_apply_label = on_apply_label
         deduped_columns: list[str] = []
         for column in columns:
             if column in self._row.row_data and column not in deduped_columns:
@@ -193,6 +208,46 @@ class RowInspectModal(ModalScreen[None]):
         self._column_index = len(self._columns) - 1
         self._refresh_content()
 
+    def _apply_label_key(self, key: str) -> None:
+        label = self._quick_label_map.get(key)
+        if not label:
+            return
+        if self._on_apply_label is None:
+            return
+        applied = self._on_apply_label(label)
+        if applied:
+            self.notify(
+                f"Annotated row {self._row.row_index} as '{label}'.",
+                timeout=2,
+            )
+
+    def action_apply_label_1(self) -> None:
+        self._apply_label_key("1")
+
+    def action_apply_label_2(self) -> None:
+        self._apply_label_key("2")
+
+    def action_apply_label_3(self) -> None:
+        self._apply_label_key("3")
+
+    def action_apply_label_4(self) -> None:
+        self._apply_label_key("4")
+
+    def action_apply_label_5(self) -> None:
+        self._apply_label_key("5")
+
+    def action_apply_label_6(self) -> None:
+        self._apply_label_key("6")
+
+    def action_apply_label_7(self) -> None:
+        self._apply_label_key("7")
+
+    def action_apply_label_8(self) -> None:
+        self._apply_label_key("8")
+
+    def action_apply_label_9(self) -> None:
+        self._apply_label_key("9")
+
     def _refresh_content(self) -> None:
         title = f"Row {self._row.row_index}"
         if self._row.row_id is not None:
@@ -206,9 +261,21 @@ class RowInspectModal(ModalScreen[None]):
             column_meta = f"Column {self._column_index + 1}/{len(self._columns)}: {column}"
             value_text = _format_value_for_inspector(self._row.row_data.get(column))
 
+        quick_summary = ", ".join(
+            f"{key}:{value}" for key, value in sorted(self._quick_label_map.items())
+        )
+        if quick_summary:
+            hint = (
+                "Tab/Shift+Tab: change column | 1..9: annotate row | "
+                f"labels {quick_summary} | Enter/Esc/q: close"
+            )
+        else:
+            hint = "Tab/Shift+Tab: change column | Enter/Esc/q: close"
+
         self.query_one("#row_inspect_title", Static).update(title)
         self.query_one("#row_inspect_column_meta", Static).update(column_meta)
         self.query_one("#row_inspect_text", TextArea).load_text(value_text)
+        self.query_one("#row_inspect_hint", Static).update(hint)
 
     CSS = """
     RowInspectModal {
@@ -325,6 +392,7 @@ class DataViewerApp(App[None]):
         Binding("q", "quit", "Quit"),
         Binding("question_mark", "show_help", "Help"),
         Binding("slash", "open_filter_bar", "Filter"),
+        Binding("f", "contains_filter_current_column", "Find"),
         Binding("colon", "open_command_bar", "Command"),
         Binding("j,down", "move_down", "Down"),
         Binding("k,up", "move_up", "Up"),
@@ -400,6 +468,22 @@ class DataViewerApp(App[None]):
             placeholder="column == value",
         )
 
+    def action_contains_filter_current_column(self) -> None:
+        column = self._current_column_name()
+        if not column:
+            self.notify("No active column is selected.", severity="warning")
+            return
+        prefix = f"{column} contains "
+        if self._filter_query:
+            value = f"{self._filter_query.raw} and {prefix}"
+        else:
+            value = prefix
+        self._open_command_modal(
+            mode="filter",
+            value=value,
+            placeholder=f"{column} contains substring",
+        )
+
     def action_open_command_bar(self) -> None:
         self._open_command_modal(
             mode="command",
@@ -423,6 +507,14 @@ class DataViewerApp(App[None]):
                 row=row,
                 columns=self._ordered_row_columns(row),
                 focused_column=focused_column,
+                quick_label_map=(
+                    self.annotation_store.quick_label_map.copy() if self.annotation_store else {}
+                ),
+                on_apply_label=lambda label: self._annotate_row(
+                    row=row,
+                    label=label,
+                    source="inspect",
+                ),
             )
         )
 
@@ -797,7 +889,6 @@ class DataViewerApp(App[None]):
         if not self.annotation_store:
             self.notify("Annotation store is not configured.", severity="warning")
             return
-
         label = self.annotation_store.quick_label_for_key(key)
         if not label:
             self.notify(f"No quick label assigned to key {key}.", severity="warning")
@@ -808,9 +899,16 @@ class DataViewerApp(App[None]):
             self.notify("No active row is selected.", severity="warning")
             return
 
+        self._annotate_row(row=row, label=label, source="grid")
+
+    def _annotate_row(self, row: RowRecord, label: str, source: str) -> bool:
+        if not self.annotation_store:
+            self.notify("Annotation store is not configured.", severity="warning")
+            return False
         self.annotation_store.append_annotation(row=row, label=label)
-        self._refresh_subtitle(last_action=f"row {row.row_index} -> {label}")
+        self._refresh_subtitle(last_action=f"{source} row {row.row_index} -> {label}")
         self.notify(f"Annotated row {row.row_index} as '{label}'.")
+        return True
 
     def action_quick_label_1(self) -> None:
         self._apply_quick_label("1")

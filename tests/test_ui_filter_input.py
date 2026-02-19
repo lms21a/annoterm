@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from textual.widgets import Input
 
 from annoterm.data.base import DataAdapter
 from annoterm.models import ColumnInfo, RowRecord
@@ -60,3 +61,14 @@ async def test_filter_input_opens_modal_and_applies_filter() -> None:
         assert app.screen_stack[-1].__class__.__name__ != "CommandInputModal"
         assert app._filter_query is not None
         assert app._filter_query.raw == "id >= 1"
+
+
+@pytest.mark.anyio
+async def test_f_opens_contains_filter_for_current_column() -> None:
+    app = DataViewerApp(adapter=_FilterAdapter(), load_rows=2)
+    async with app.run_test() as pilot:
+        await pilot.press("f")
+        modal = app.screen_stack[-1]
+        assert modal.__class__.__name__ == "CommandInputModal"
+        input_widget = modal.query_one("#command_modal_input", Input)
+        assert input_widget.value == "id contains "
