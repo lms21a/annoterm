@@ -411,7 +411,6 @@ class TaskLabelModal(ModalScreen[None]):
 
     BINDINGS = [
         Binding("escape", "close", "Close"),
-        Binding("q", "close", "Close"),
         Binding("tab,right", "next_task", "Next Task"),
         Binding("shift+tab,left", "previous_task", "Prev Task"),
         Binding("ctrl+l", "focus_input", "Add Label"),
@@ -439,7 +438,7 @@ class TaskLabelModal(ModalScreen[None]):
                 id="task_mode_add_input",
             )
             yield Static(
-                "Enter: add label | task <name>: create/switch task | Tab/Shift+Tab: switch task | Esc/q: close",
+                "Enter: add label | task <name>: create/switch task | Tab/Shift+Tab: switch task | Escape: close",
                 id="task_mode_hint",
             )
 
@@ -580,31 +579,31 @@ class DataViewerApp(App[None]):
         Binding("q", "quit", "Quit"),
         Binding("question_mark", "show_help", "Help"),
         Binding("slash", "open_filter_bar", "Filter"),
-        Binding("f", "contains_filter_current_column", "Find"),
-        Binding("colon", "open_command_bar", "Command"),
+        Binding("f", "contains_filter_current_column", "Find", show=False),
+        Binding("colon", "open_command_bar", "Command Palette"),
         Binding("a", "open_annotation_input", "Annotate"),
         Binding("t", "open_task_input", "Task"),
-        Binding("j,down", "move_down", "Down"),
-        Binding("k,up", "move_up", "Up"),
-        Binding("h,left", "move_left", "Left"),
-        Binding("l,right", "move_right", "Right"),
-        Binding("ctrl+d", "page_down", "Page Down"),
-        Binding("ctrl+u", "page_up", "Page Up"),
-        Binding("g", "go_top", "Top"),
-        Binding("G,shift+g,end", "go_bottom", "Bottom"),
-        Binding("s", "toggle_sort_current_column", "Sort"),
-        Binding("c", "toggle_current_column_visibility", "Hide Column"),
-        Binding("shift+c", "show_all_columns", "Show Columns"),
-        Binding("r", "reset_view_state", "Reset"),
-        Binding("1", "quick_label_1", "Label 1"),
-        Binding("2", "quick_label_2", "Label 2"),
-        Binding("3", "quick_label_3", "Label 3"),
-        Binding("4", "quick_label_4", "Label 4"),
-        Binding("5", "quick_label_5", "Label 5"),
-        Binding("6", "quick_label_6", "Label 6"),
-        Binding("7", "quick_label_7", "Label 7"),
-        Binding("8", "quick_label_8", "Label 8"),
-        Binding("9", "quick_label_9", "Label 9"),
+        Binding("j,down", "move_down", "Down", show=False),
+        Binding("k,up", "move_up", "Up", show=False),
+        Binding("h,left", "move_left", "Left", show=False),
+        Binding("l,right", "move_right", "Right", show=False),
+        Binding("ctrl+d", "page_down", "Page Down", show=False),
+        Binding("ctrl+u", "page_up", "Page Up", show=False),
+        Binding("g", "go_top", "Top", show=False),
+        Binding("G,shift+g,end", "go_bottom", "Bottom", show=False),
+        Binding("s", "toggle_sort_current_column", "Sort", show=False),
+        Binding("c", "toggle_current_column_visibility", "Hide Column", show=False),
+        Binding("shift+c", "show_all_columns", "Show Columns", show=False),
+        Binding("r", "reset_view_state", "Reset", show=False),
+        Binding("1", "quick_label_1", "Label 1", show=False),
+        Binding("2", "quick_label_2", "Label 2", show=False),
+        Binding("3", "quick_label_3", "Label 3", show=False),
+        Binding("4", "quick_label_4", "Label 4", show=False),
+        Binding("5", "quick_label_5", "Label 5", show=False),
+        Binding("6", "quick_label_6", "Label 6", show=False),
+        Binding("7", "quick_label_7", "Label 7", show=False),
+        Binding("8", "quick_label_8", "Label 8", show=False),
+        Binding("9", "quick_label_9", "Label 9", show=False),
     ]
 
     def __init__(
@@ -630,7 +629,7 @@ class DataViewerApp(App[None]):
         self._filtered_row_count = 0
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        yield Header(show_clock=False)
         yield DataTable(id="grid")
         yield Footer()
 
@@ -730,28 +729,27 @@ class DataViewerApp(App[None]):
     def _refresh_subtitle(self, last_action: str | None = None) -> None:
         total_rows_display = str(self._filtered_row_count)
         annotations_count = self.annotation_store.annotation_count() if self.annotation_store else 0
-        quick_labels = self.annotation_store.active_hotkeys() if self.annotation_store else {}
-        quick_summary = ", ".join(f"{key}:{value}" for key, value in sorted(quick_labels.items()))
-        if not quick_summary:
-            quick_summary = "none"
         task_display = self.annotation_store.active_task_type() if self.annotation_store else "none"
+        source_text = self.adapter.source_uri
+        if len(source_text) > 48:
+            source_text = f"...{source_text[-45:]}"
 
-        filter_display = self._filter_query.raw if self._filter_query else "none"
-        sort_display = (
-            f"{self._sort_spec.column}:{'desc' if self._sort_spec.descending else 'asc'}"
-            if self._sort_spec
-            else "none"
-        )
-        visible_columns = self._visible_column_names()
+        parts = [
+            f"src {source_text}",
+            f"row {self._view_row_position}/{total_rows_display}",
+            f"task {task_display}",
+            f"annotations {annotations_count}",
+        ]
+        if self._filter_query:
+            filter_text = self._filter_query.raw
+            if len(filter_text) > 36:
+                filter_text = f"{filter_text[:33]}..."
+            parts.append(f"filter {filter_text}")
+        if self._sort_spec:
+            direction = "desc" if self._sort_spec.descending else "asc"
+            parts.append(f"sort {self._sort_spec.column}:{direction}")
 
-        subtitle = (
-            f"{self.adapter.source_type}:{self.adapter.source_uri} "
-            f"| row {self._view_row_position}/{total_rows_display} "
-            f"| loaded {len(self._loaded_rows)} "
-            f"| cols {len(visible_columns)}/{len(self._schema)} "
-            f"| filter {filter_display} | sort {sort_display} "
-            f"| task {task_display} | annotations {annotations_count} | quick {quick_summary}"
-        )
+        subtitle = " | ".join(parts)
         mode_display = {
             "filter": "/",
             "command": ":",
@@ -761,7 +759,8 @@ class DataViewerApp(App[None]):
         if self._command_mode in mode_display:
             subtitle = f"{subtitle} | mode {mode_display[self._command_mode]}"
         if last_action:
-            subtitle = f"{subtitle} | last {last_action}"
+            action_text = last_action if len(last_action) <= 32 else f"{last_action[:29]}..."
+            subtitle = f"{subtitle} | last {action_text}"
         self.sub_title = subtitle
 
     def _format_cell(self, value: Any) -> str:
