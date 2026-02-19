@@ -43,6 +43,7 @@ In the viewer:
 - Records are appended to `<bundle-dir>/annotations.jsonl`.
 - Press `?` for an on-screen help modal with shortcuts and command reference.
 - Navigation keys: `j/k` (up/down), `ctrl+d/u` (page), `g/G` (top/bottom).
+- Press `Enter` to inspect the full row + focused cell value (no truncation).
 - Sorting: `s` toggles sort on the focused column.
 - Columns: `c` hides current column, `C` restores all columns.
 - Reset view state: `r`.
