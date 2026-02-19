@@ -1,0 +1,20 @@
+[project]
+name = "annoterm"
+version = "0.1.0"
+description = "Keyboard-first TUI for viewing and annotating tabular data."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "datasets>=4.5.0",
+    "orjson>=3.11.7",
+    "polars>=1.38.1",
+    "pydantic>=2.12.5",
+    "pytest>=9.0.2",
+    "textual>=8.0.0",
+]
+
+[project.scripts]
+annoterm = "annoterm.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
