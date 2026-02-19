@@ -15,7 +15,11 @@ class _RowsAdapter(DataAdapter):
         self._total_rows = total_rows
 
     def schema(self) -> list[ColumnInfo]:
-        return [ColumnInfo(name="id", dtype="Int64"), ColumnInfo(name="text", dtype="String")]
+        return [
+            ColumnInfo(name="id", dtype="Int64"),
+            ColumnInfo(name="text", dtype="String"),
+            ColumnInfo(name="meta", dtype="String"),
+        ]
 
     def row_count(self, filter_query=None) -> int:
         return self._total_rows
@@ -28,10 +32,10 @@ class _RowsAdapter(DataAdapter):
         filter_query=None,
         sort=None,
     ) -> list[RowRecord]:
-        selected = visible_columns or ["id", "text"]
+        selected = visible_columns or ["id", "text", "meta"]
         records: list[RowRecord] = []
         for index in range(offset, min(offset + limit, self._total_rows)):
-            row_data = {"id": index, "text": "x" * 240}
+            row_data = {"id": index, "text": "x" * 240, "meta": f"m-{index}"}
             row_data = {name: value for name, value in row_data.items() if name in selected}
             records.append(
                 RowRecord(
@@ -61,6 +65,14 @@ async def test_enter_opens_row_inspector_modal() -> None:
     app = DataViewerApp(adapter=_RowsAdapter(total_rows=4), load_rows=2)
     async with app.run_test() as pilot:
         await pilot.press("enter")
-        assert app.screen_stack[-1].__class__.__name__ == "RowInspectModal"
+        modal = app.screen_stack[-1]
+        assert modal.__class__.__name__ == "RowInspectModal"
+        assert getattr(modal, "current_column_name") == "id"
+
+        await pilot.press("tab")
+        assert getattr(modal, "current_column_name") == "text"
+        await pilot.press("shift+tab")
+        assert getattr(modal, "current_column_name") == "id"
+
         await pilot.press("escape")
         assert app.screen_stack[-1].__class__.__name__ != "RowInspectModal"

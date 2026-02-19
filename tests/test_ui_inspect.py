@@ -1,48 +1,22 @@
 from __future__ import annotations
 
-from annoterm.data.base import DataAdapter
-from annoterm.models import ColumnInfo, RowRecord
-from annoterm.ui.app import DataViewerApp
+from annoterm.models import RowRecord
+from annoterm.ui.app import RowInspectModal, _format_value_for_inspector
 
 
-class _StubAdapter(DataAdapter):
-    source_type = "csv"
-
-    def schema(self) -> list[ColumnInfo]:
-        return [ColumnInfo(name="text", dtype="String")]
-
-    def row_count(self, filter_query=None) -> int:
-        return 1
-
-    def rows(
-        self,
-        offset: int,
-        limit: int,
-        visible_columns=None,
-        filter_query=None,
-        sort=None,
-    ) -> list[RowRecord]:
-        return []
-
-    def fingerprint(self) -> str:
-        return "sha256:test"
+def test_format_value_for_inspector_keeps_long_text() -> None:
+    long_text = "x" * 500
+    rendered = _format_value_for_inspector(long_text)
+    assert rendered == long_text
 
 
-def test_build_row_inspect_text_contains_full_value() -> None:
-    adapter = _StubAdapter(source_uri="stub.csv")
-    app = DataViewerApp(adapter=adapter)
-
-    long_value = "x" * 500
+def test_row_inspect_modal_respects_focused_column() -> None:
     row = RowRecord(
-        row_index=7,
-        row_data={"text": long_value},
-        row_id="r7",
+        row_index=3,
+        row_data={"id": 3, "text": "hello", "label": "ok"},
+        row_id="3",
         key_fields={},
-        row_hash="sha256:abc",
+        row_hash="sha256:3",
     )
-
-    inspect_text = app._build_row_inspect_text(row, "text", long_value)
-
-    assert "focused_column: text" in inspect_text
-    assert long_value in inspect_text
-    assert "full_row_json:" in inspect_text
+    modal = RowInspectModal(row=row, columns=["id", "text", "label"], focused_column="text")
+    assert modal.current_column_name == "text"

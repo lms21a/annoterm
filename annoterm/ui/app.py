@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import shlex
 from typing import Any
 
@@ -27,7 +26,7 @@ j / k (or arrows): move row
 h / l: move column
 ctrl+d / ctrl+u: page down / up
 g / G: top / bottom
-Enter: inspect full row + focused cell value
+Enter: inspect row (Tab / Shift+Tab to move columns)
 
 [b]View Controls[/b]
 /: open filter input
@@ -53,6 +52,20 @@ help
 
 Press Esc, q, Enter, or ? to close this help.
 """
+
+
+def _format_value_for_inspector(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, (dict, list, tuple)):
+        try:
+            return orjson.dumps(
+                value,
+                option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS,
+            ).decode("utf-8")
+        except TypeError:
+            return str(value)
+    return str(value)
 
 
 class HelpModal(ModalScreen[None]):
@@ -92,35 +105,110 @@ class HelpModal(ModalScreen[None]):
 
 
 class RowInspectModal(ModalScreen[None]):
-    """Modal with full row JSON and focused cell value."""
+    """Modal for row-level inspection with per-column value browsing."""
 
     BINDINGS = [
         Binding("escape", "close", "Close"),
         Binding("q", "close", "Close"),
         Binding("enter", "close", "Close"),
+        Binding("tab,right", "next_column", "Next Column", show=False, priority=True),
+        Binding("shift+tab,left", "previous_column", "Prev Column", show=False, priority=True),
+        Binding("home", "first_column", "First Column", show=False, priority=True),
+        Binding("end", "last_column", "Last Column", show=False, priority=True),
     ]
 
-    def __init__(self, title: str, text: str) -> None:
+    def __init__(
+        self,
+        row: RowRecord,
+        columns: list[str],
+        focused_column: str | None = None,
+    ) -> None:
         super().__init__()
-        self._title = title
-        self._text = text
+        self._row = row
+        deduped_columns: list[str] = []
+        for column in columns:
+            if column in self._row.row_data and column not in deduped_columns:
+                deduped_columns.append(column)
+        for column in self._row.row_data:
+            if column not in deduped_columns:
+                deduped_columns.append(column)
+        self._columns = deduped_columns
+
+        if focused_column in self._columns:
+            self._column_index = self._columns.index(focused_column)
+        else:
+            self._column_index = 0
 
     def compose(self) -> ComposeResult:
         with Container(id="row_inspect_modal"):
-            yield Static(self._title, id="row_inspect_title")
+            yield Static("", id="row_inspect_title")
+            yield Static("", id="row_inspect_column_meta")
             yield TextArea(
-                self._text,
-                language="json",
+                "",
                 read_only=True,
                 show_cursor=False,
                 show_line_numbers=False,
                 soft_wrap=False,
                 id="row_inspect_text",
             )
-            yield Static("Press Esc, q, or Enter to close.", id="row_inspect_hint")
+            yield Static(
+                "Tab/Shift+Tab: change column | Enter/Esc/q: close",
+                id="row_inspect_hint",
+            )
+
+    @property
+    def current_column_name(self) -> str | None:
+        if not self._columns:
+            return None
+        return self._columns[self._column_index]
+
+    def on_mount(self) -> None:
+        self._refresh_content()
+        self.query_one("#row_inspect_text", TextArea).focus()
 
     def action_close(self) -> None:
         self.dismiss(None)
+
+    def action_next_column(self) -> None:
+        if not self._columns:
+            return
+        self._column_index = (self._column_index + 1) % len(self._columns)
+        self._refresh_content()
+
+    def action_previous_column(self) -> None:
+        if not self._columns:
+            return
+        self._column_index = (self._column_index - 1) % len(self._columns)
+        self._refresh_content()
+
+    def action_first_column(self) -> None:
+        if not self._columns:
+            return
+        self._column_index = 0
+        self._refresh_content()
+
+    def action_last_column(self) -> None:
+        if not self._columns:
+            return
+        self._column_index = len(self._columns) - 1
+        self._refresh_content()
+
+    def _refresh_content(self) -> None:
+        title = f"Row {self._row.row_index}"
+        if self._row.row_id is not None:
+            title = f"{title} | row_id {self._row.row_id}"
+
+        if not self._columns:
+            column_meta = "No columns in this row."
+            value_text = "{}"
+        else:
+            column = self._columns[self._column_index]
+            column_meta = f"Column {self._column_index + 1}/{len(self._columns)}: {column}"
+            value_text = _format_value_for_inspector(self._row.row_data.get(column))
+
+        self.query_one("#row_inspect_title", Static).update(title)
+        self.query_one("#row_inspect_column_meta", Static).update(column_meta)
+        self.query_one("#row_inspect_text", TextArea).load_text(value_text)
 
     CSS = """
     RowInspectModal {
@@ -139,6 +227,11 @@ class RowInspectModal(ModalScreen[None]):
         width: 100%;
         padding: 0 0 1 0;
         text-style: bold;
+    }
+    #row_inspect_column_meta {
+        width: 100%;
+        color: $text-muted;
+        padding: 0 0 1 0;
     }
     #row_inspect_text {
         width: 100%;
@@ -324,15 +417,14 @@ class DataViewerApp(App[None]):
         if row is None:
             self.notify("No active row is selected.", severity="warning")
             return
-        column = self._current_column_name()
-        focused_value = row.row_data.get(column) if column else None
-        title = f"Row {row.row_index}"
-        if row.row_id is not None:
-            title = f"{title} | row_id {row.row_id}"
-        if column:
-            title = f"{title} | column {column}"
-        text = self._build_row_inspect_text(row, column, focused_value)
-        self.push_screen(RowInspectModal(title=title, text=text))
+        focused_column = self._current_column_name()
+        self.push_screen(
+            RowInspectModal(
+                row=row,
+                columns=self._ordered_row_columns(row),
+                focused_column=focused_column,
+            )
+        )
 
     def _refresh_subtitle(self, last_action: str | None = None) -> None:
         total_rows_display = str(self._filtered_row_count)
@@ -375,55 +467,10 @@ class DataViewerApp(App[None]):
         stringified = str(value)
         return stringified if len(stringified) <= 120 else f"{stringified[:117]}..."
 
-    def _build_row_inspect_text(
-        self,
-        row: RowRecord,
-        focused_column: str | None,
-        focused_value: Any,
-    ) -> str:
-        row_payload = {
-            "row_index": row.row_index,
-            "row_id": row.row_id,
-            "key_fields": row.key_fields,
-            "row_hash": row.row_hash,
-            "row_data": row.row_data,
-        }
-        try:
-            row_json = orjson.dumps(
-                row_payload,
-                option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS,
-            ).decode("utf-8")
-        except TypeError:
-            row_json = json.dumps(row_payload, indent=2, sort_keys=True, default=str)
-
-        lines: list[str] = [
-            f"row_index: {row.row_index}",
-            f"row_id: {row.row_id}",
-            f"row_hash: {row.row_hash}",
-        ]
-        if focused_column:
-            lines.extend(
-                [
-                    f"focused_column: {focused_column}",
-                    "focused_value:",
-                    self._stringify_full_value(focused_value),
-                ]
-            )
-        lines.extend(["", "full_row_json:", row_json])
-        return "\n".join(lines)
-
-    def _stringify_full_value(self, value: Any) -> str:
-        if value is None:
-            return "null"
-        if isinstance(value, (dict, list, tuple)):
-            try:
-                return orjson.dumps(
-                    value,
-                    option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS,
-                ).decode("utf-8")
-            except TypeError:
-                return json.dumps(value, indent=2, sort_keys=True, default=str)
-        return str(value)
+    def _ordered_row_columns(self, row: RowRecord) -> list[str]:
+        schema_columns = [column.name for column in self._schema if column.name in row.row_data]
+        extras = [column for column in row.row_data if column not in schema_columns]
+        return schema_columns + extras
 
     def _current_row(self) -> RowRecord | None:
         table = self.query_one(DataTable)
@@ -627,7 +674,7 @@ class DataViewerApp(App[None]):
             self._loaded_rows = self.adapter.rows(
                 offset=self._window_start,
                 limit=self.load_rows,
-                visible_columns=visible_columns,
+                visible_columns=None,
                 filter_query=self._filter_query,
                 sort=self._sort_spec,
             )
