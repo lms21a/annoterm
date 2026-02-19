@@ -89,3 +89,73 @@ def test_bundle_init_rejects_mismatched_dataset_fingerprint(tmp_path: Path) -> N
     )
     with pytest.raises(ValueError, match="fingerprint"):
         second.ensure_initialized()
+
+
+def test_set_task_type_persists_label_set(tmp_path: Path) -> None:
+    bundle_dir = tmp_path / "bundle"
+    store = AnnotationBundleStore(
+        bundle_dir=bundle_dir,
+        dataset_meta=_dataset_meta("sample.csv", "sha256:dataset1"),
+    )
+    store.ensure_initialized()
+
+    active = store.set_task_type("classification")
+    assert active == "classification"
+    assert store.active_task_type() == "classification"
+    assert store.labels() == []
+
+    label_set = orjson.loads((bundle_dir / "label_set.json").read_bytes())
+    assert label_set["active_task_type"] == "classification"
+    assert label_set["task_type"] == "classification"
+    assert "classification" in label_set["task_profiles"]
+
+
+def test_ensure_label_supports_more_than_nine_labels(tmp_path: Path) -> None:
+    bundle_dir = tmp_path / "bundle"
+    quick_labels = tuple(f"l{index}" for index in range(1, 10))
+    store = AnnotationBundleStore(
+        bundle_dir=bundle_dir,
+        dataset_meta=_dataset_meta("sample.csv", "sha256:dataset1"),
+        quick_labels=quick_labels,
+    )
+    store.ensure_initialized()
+
+    label, key, created = store.ensure_label("extra-label")
+    assert label == "extra-label"
+    assert created is True
+    assert key is None
+    assert store.quick_label_map == {str(index): f"l{index}" for index in range(1, 10)}
+
+    label_set = orjson.loads((bundle_dir / "label_set.json").read_bytes())
+    assert "extra-label" in label_set["labels"]
+
+
+def test_labels_are_scoped_per_task(tmp_path: Path) -> None:
+    bundle_dir = tmp_path / "bundle"
+    store = AnnotationBundleStore(
+        bundle_dir=bundle_dir,
+        dataset_meta=_dataset_meta("sample.csv", "sha256:dataset1"),
+        quick_labels=("good", "bad"),
+    )
+    store.ensure_initialized()
+    assert store.labels() == ["good", "bad"]
+    assert store.active_task_type() == "preference"
+
+    store.ensure_label("needs-review")
+    assert store.labels() == ["good", "bad", "needs-review"]
+
+    store.set_task_type("classification")
+    assert store.labels() == []
+    added_label, added_key, created = store.ensure_label("entity-person")
+    assert created is True
+    assert added_label == "entity-person"
+    assert added_key == "1"
+    assert store.labels() == ["entity-person"]
+
+    store.set_task_type("preference")
+    assert store.labels() == ["good", "bad", "needs-review"]
+
+    label_set = orjson.loads((bundle_dir / "label_set.json").read_bytes())
+    assert sorted(label_set["task_profiles"].keys()) == ["classification", "preference"]
+    assert label_set["task_profiles"]["classification"]["labels"] == ["entity-person"]
+    assert label_set["task_profiles"]["preference"]["labels"] == ["good", "bad", "needs-review"]

@@ -133,11 +133,7 @@ def import_bundle(
     target_labels = _read_json(target / "label_set.json")
     source_labels = _read_json(source / "label_set.json")
     merged_label_set = _merge_label_set(target_labels, source_labels)
-    label_set_changed = (
-        merged_label_set.get("labels") != target_labels.get("labels")
-        or merged_label_set.get("hotkeys") != target_labels.get("hotkeys")
-        or merged_label_set.get("task_type") != target_labels.get("task_type")
-    )
+    label_set_changed = _normalize_label_set_payload(target_labels) != merged_label_set
     if not dry_run:
         _write_json(target / "label_set.json", merged_label_set)
 
@@ -288,6 +284,57 @@ def _count_annotations(path: Path) -> int:
 
 
 def _merge_label_set(target: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
+    target_norm = _normalize_label_set_payload(target)
+    source_norm = _normalize_label_set_payload(source)
+
+    merged_profiles = {
+        task: {
+            "labels": list(profile["labels"]),
+            "hotkeys": dict(profile["hotkeys"]),
+        }
+        for task, profile in target_norm["task_profiles"].items()
+    }
+
+    for task_name, source_profile in source_norm["task_profiles"].items():
+        if task_name in merged_profiles:
+            merged_profiles[task_name] = _merge_task_profile(
+                merged_profiles[task_name],
+                source_profile,
+            )
+        else:
+            merged_profiles[task_name] = {
+                "labels": list(source_profile["labels"]),
+                "hotkeys": dict(source_profile["hotkeys"]),
+            }
+
+    active_task = target_norm["active_task_type"]
+    if active_task not in merged_profiles:
+        active_task = source_norm["active_task_type"]
+    if active_task not in merged_profiles:
+        active_task = "preference"
+        merged_profiles.setdefault(active_task, {"labels": [], "hotkeys": {}})
+
+    active_profile = merged_profiles[active_task]
+    ordered_profiles = {
+        task: {
+            "labels": list(profile["labels"]),
+            "hotkeys": dict(sorted(profile["hotkeys"].items(), key=lambda item: item[0])),
+        }
+        for task, profile in sorted(merged_profiles.items(), key=lambda item: item[0])
+    }
+    return {
+        "schema_version": str(
+            target_norm.get("schema_version") or source_norm.get("schema_version") or "1.0"
+        ),
+        "active_task_type": active_task,
+        "task_type": active_task,
+        "labels": list(active_profile["labels"]),
+        "hotkeys": dict(sorted(active_profile["hotkeys"].items(), key=lambda item: item[0])),
+        "task_profiles": ordered_profiles,
+    }
+
+
+def _merge_task_profile(target: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     target_labels = [str(label) for label in target.get("labels", []) if str(label).strip()]
     source_labels = [str(label) for label in source.get("labels", []) if str(label).strip()]
 
@@ -310,7 +357,6 @@ def _merge_label_set(target: dict[str, Any], source: dict[str, Any]) -> dict[str
     merged_hotkeys = dict(target_hotkeys)
     used_labels = set(merged_hotkeys.values())
 
-    # Add source mappings when the key is free or identical.
     for key in sorted(source_hotkeys):
         label = source_hotkeys[key]
         if key not in merged_hotkeys:
@@ -319,7 +365,6 @@ def _merge_label_set(target: dict[str, Any], source: dict[str, Any]) -> dict[str
         elif merged_hotkeys[key] == label:
             used_labels.add(label)
 
-    # Ensure all labels are mapped, filling remaining numeric slots 1..9.
     free_keys = [str(index) for index in range(1, 10) if str(index) not in merged_hotkeys]
     for label in merged_labels:
         if label in used_labels:
@@ -330,10 +375,86 @@ def _merge_label_set(target: dict[str, Any], source: dict[str, Any]) -> dict[str
         used_labels.add(label)
 
     return {
-        "schema_version": target.get("schema_version", source.get("schema_version", "1.0")),
-        "task_type": target.get("task_type", source.get("task_type", "preference")),
         "labels": merged_labels,
         "hotkeys": dict(sorted(merged_hotkeys.items(), key=lambda item: item[0])),
+    }
+
+
+def _normalize_label_set_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    active_task = (
+        str(payload.get("active_task_type") or "").strip()
+        or str(payload.get("task_type") or "").strip()
+        or "preference"
+    )
+    task_profiles_payload = payload.get("task_profiles")
+    profiles: dict[str, dict[str, Any]] = {}
+    if isinstance(task_profiles_payload, dict):
+        for raw_task, raw_profile in task_profiles_payload.items():
+            task_name = str(raw_task).strip()
+            if not task_name:
+                continue
+            if not isinstance(raw_profile, dict):
+                raw_profile = {}
+            profiles[task_name] = _normalize_task_profile(
+                labels=raw_profile.get("labels") or [],
+                hotkeys=raw_profile.get("hotkeys") or {},
+            )
+
+    if not profiles:
+        profiles[active_task] = _normalize_task_profile(
+            labels=payload.get("labels") or [],
+            hotkeys=payload.get("hotkeys") or {},
+        )
+
+    if active_task not in profiles:
+        profiles[active_task] = _normalize_task_profile(labels=[], hotkeys={})
+
+    active_profile = profiles[active_task]
+    ordered_profiles = {
+        task_name: {
+            "labels": list(profile["labels"]),
+            "hotkeys": dict(sorted(profile["hotkeys"].items(), key=lambda item: item[0])),
+        }
+        for task_name, profile in sorted(profiles.items(), key=lambda item: item[0])
+    }
+    return {
+        "schema_version": str(payload.get("schema_version") or "1.0"),
+        "active_task_type": active_task,
+        "task_type": active_task,
+        "labels": list(active_profile["labels"]),
+        "hotkeys": dict(sorted(active_profile["hotkeys"].items(), key=lambda item: item[0])),
+        "task_profiles": ordered_profiles,
+    }
+
+
+def _normalize_task_profile(labels: list[Any], hotkeys: dict[str, Any]) -> dict[str, Any]:
+    normalized_labels: list[str] = []
+    label_index: set[str] = set()
+    for label in labels:
+        text = str(label).strip()
+        if not text:
+            continue
+        key = text.casefold()
+        if key in label_index:
+            continue
+        normalized_labels.append(text)
+        label_index.add(key)
+
+    normalized_hotkeys: dict[str, str] = {}
+    for key_raw, label_raw in hotkeys.items():
+        key = str(key_raw).strip()
+        label = str(label_raw).strip()
+        if not key or not label:
+            continue
+        normalized_hotkeys[key] = label
+        label_key = label.casefold()
+        if label_key not in label_index:
+            normalized_labels.append(label)
+            label_index.add(label_key)
+
+    return {
+        "labels": normalized_labels,
+        "hotkeys": normalized_hotkeys,
     }
 
 

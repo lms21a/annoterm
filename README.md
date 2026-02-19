@@ -46,6 +46,9 @@ In the viewer:
 - Navigation keys: `j/k` (up/down), `ctrl+d/u` (page), `g/G` (top/bottom).
 - Press `Enter` to inspect the row in a popup, then use `Tab` / `Shift+Tab` to cycle columns.
 - In row inspect mode, `1..9` also applies quick-label annotations.
+- Press `a` to annotate the current row with any label (new labels are added automatically).
+- Press `t` to set/switch the active annotation task, then open task label mode.
+- In task label mode, use `Enter` to add labels and `Ctrl+N` / `Ctrl+P` to switch tasks.
 - Sorting: `s` toggles sort on the focused column.
 - Columns: `c` hides current column, `C` restores all columns.
 - Reset view state: `r`.
@@ -54,12 +57,22 @@ In the viewer:
 - `/` and `:` open a centered popup input modal so typing stays visible even in tmux.
 - Command bar: `:` then run commands such as:
   - `row 1200`
+  - `annotate high-quality`
+  - `label needs-review`
+  - `labels`
+  - `task classification`
+  - `tasks`
   - `sort score desc`
   - `hide text`
   - `show text`
   - `show-all`
   - `filter score >= 0.9`
   - `reset`
+
+Hotkey behavior:
+- The first nine labels are mapped to quick keys `1..9`.
+- Additional labels are still supported and can be applied through `a` or `:annotate <label>`.
+- Labels/hotkeys are task-scoped (for example `preference` vs `classification` can have different sets).
 
 ### Share and merge bundles
 

@@ -39,11 +39,19 @@ r: reset filter/sort/columns
 
 [b]Annotations[/b]
 1..9: apply quick label to focused row
+a: annotate focused row with typed label
+t: set/switch task, then open task label mode
 In inspect modal, 1..9 also annotate current row
+In task label mode: Enter add label, Ctrl+N/P switch tasks
 
 [b]Commands[/b]
 row <index>
 filter <expr>
+annotate <label>
+label <label>
+labels
+task <task_type>
+tasks
 sort <column> [asc|desc|none]
 hide <column>
 show <column>
@@ -332,8 +340,21 @@ class CommandInputModal(ModalScreen[str | None]):
         self._placeholder = placeholder
 
     def compose(self) -> ComposeResult:
-        mode_label = "Filter" if self._mode == "filter" else "Command"
-        prefix = "/" if self._mode == "filter" else ":"
+        if self._mode == "filter":
+            mode_label = "Filter"
+            prefix = "/"
+        elif self._mode == "command":
+            mode_label = "Command"
+            prefix = ":"
+        elif self._mode == "annotate":
+            mode_label = "Annotate"
+            prefix = "a"
+        elif self._mode == "task":
+            mode_label = "Task"
+            prefix = "t"
+        else:
+            mode_label = "Input"
+            prefix = ""
         with Container(id="command_modal"):
             yield Static(f"{mode_label} ({prefix})", id="command_modal_title")
             yield Input(
@@ -385,6 +406,160 @@ class CommandInputModal(ModalScreen[str | None]):
     """
 
 
+class TaskLabelModal(ModalScreen[None]):
+    """Task-scoped label management modal."""
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("q", "close", "Close"),
+        Binding("ctrl+n", "next_task", "Next Task"),
+        Binding("ctrl+p", "previous_task", "Prev Task"),
+        Binding("ctrl+l", "focus_input", "Add Label"),
+    ]
+
+    def __init__(
+        self,
+        get_state: Callable[[], dict[str, Any]],
+        on_add_label: Callable[[str], tuple[str, bool, str | None] | None],
+        on_switch_task: Callable[[str], bool],
+    ) -> None:
+        super().__init__()
+        self._get_state = get_state
+        self._on_add_label = on_add_label
+        self._on_switch_task = on_switch_task
+
+    def compose(self) -> ComposeResult:
+        with Container(id="task_mode_modal"):
+            yield Static("", id="task_mode_title")
+            yield Static("", id="task_mode_tasks")
+            yield Static("", id="task_mode_labels")
+            yield Input(
+                value="",
+                placeholder="Add label and press Enter",
+                id="task_mode_add_input",
+            )
+            yield Static(
+                "Enter: add label | Ctrl+N/P: switch task | Esc/q: close",
+                id="task_mode_hint",
+            )
+
+    def on_mount(self) -> None:
+        self._refresh_content()
+        self.query_one("#task_mode_add_input", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "task_mode_add_input":
+            return
+        label = event.value.strip()
+        if not label:
+            return
+        result = self._on_add_label(label)
+        if result is None:
+            return
+        normalized_label, created, hotkey = result
+        event.input.value = ""
+        self._refresh_content()
+        if created and hotkey:
+            self.notify(f"Added '{normalized_label}' on key {hotkey}.")
+        elif created:
+            self.notify(f"Added '{normalized_label}' (no quick key).")
+        else:
+            self.notify(f"Label '{normalized_label}' already exists.")
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+    def action_focus_input(self) -> None:
+        self.query_one("#task_mode_add_input", Input).focus()
+
+    def action_next_task(self) -> None:
+        self._switch_task(offset=1)
+
+    def action_previous_task(self) -> None:
+        self._switch_task(offset=-1)
+
+    def _switch_task(self, offset: int) -> None:
+        state = self._get_state()
+        tasks = list(state.get("task_types") or [])
+        active_task = str(state.get("active_task_type") or "")
+        if not tasks:
+            return
+        if active_task in tasks:
+            index = tasks.index(active_task)
+        else:
+            index = 0
+        next_task = tasks[(index + offset) % len(tasks)]
+        if self._on_switch_task(next_task):
+            self._refresh_content()
+
+    def _refresh_content(self) -> None:
+        state = self._get_state()
+        active_task = str(state.get("active_task_type") or "none")
+        tasks = list(state.get("task_types") or [])
+        labels = list(state.get("labels") or [])
+        hotkeys = dict(state.get("hotkeys") or {})
+
+        tasks_line = " | ".join(
+            f"[{task}]" if task == active_task else task for task in tasks
+        ) or "none"
+        lines = []
+        if not labels:
+            lines.append("No labels yet for this task.")
+        else:
+            for index, label in enumerate(labels, start=1):
+                assigned = next((key for key, value in hotkeys.items() if value == label), None)
+                if assigned:
+                    lines.append(f"{index:>2}. ({assigned}) {label}")
+                else:
+                    lines.append(f"{index:>2}. (.) {label}")
+        if len(labels) > 9:
+            lines.append("Labels without 1..9 quick keys can still be used via `a` or `:annotate`.")
+
+        self.query_one("#task_mode_title", Static).update(f"Task Label Mode | active: {active_task}")
+        self.query_one("#task_mode_tasks", Static).update(f"Tasks (Ctrl+N/P): {tasks_line}")
+        self.query_one("#task_mode_labels", Static).update("\n".join(lines))
+
+    CSS = """
+    TaskLabelModal {
+        align: center middle;
+    }
+    #task_mode_modal {
+        width: 88%;
+        max-width: 110;
+        height: auto;
+        max-height: 90%;
+        border: tall $accent;
+        padding: 1;
+        background: $surface;
+        layout: vertical;
+    }
+    #task_mode_title {
+        width: 100%;
+        text-style: bold;
+        padding: 0 0 1 0;
+    }
+    #task_mode_tasks {
+        width: 100%;
+        color: $text-muted;
+        padding: 0 0 1 0;
+    }
+    #task_mode_labels {
+        width: 100%;
+        max-height: 18;
+        overflow-y: auto;
+    }
+    #task_mode_add_input {
+        width: 100%;
+        margin: 1 0 0 0;
+    }
+    #task_mode_hint {
+        width: 100%;
+        color: $text-muted;
+        padding: 1 0 0 0;
+    }
+    """
+
+
 class DataViewerApp(App[None]):
     """Viewer with virtual paging, filter/sort commands, and quick labels."""
 
@@ -394,6 +569,8 @@ class DataViewerApp(App[None]):
         Binding("slash", "open_filter_bar", "Filter"),
         Binding("f", "contains_filter_current_column", "Find"),
         Binding("colon", "open_command_bar", "Command"),
+        Binding("a", "open_annotation_input", "Annotate"),
+        Binding("t", "open_task_input", "Task"),
         Binding("j,down", "move_down", "Down"),
         Binding("k,up", "move_up", "Up"),
         Binding("h,left", "move_left", "Left"),
@@ -491,6 +668,29 @@ class DataViewerApp(App[None]):
             placeholder="row 1200",
         )
 
+    def action_open_annotation_input(self) -> None:
+        if not self.annotation_store:
+            self.notify("Annotation store is not configured.", severity="warning")
+            return
+        if self._current_row() is None:
+            self.notify("No active row is selected.", severity="warning")
+            return
+        self._open_command_modal(
+            mode="annotate",
+            value="",
+            placeholder="high-quality",
+        )
+
+    def action_open_task_input(self) -> None:
+        if not self.annotation_store:
+            self.notify("Annotation store is not configured.", severity="warning")
+            return
+        self._open_command_modal(
+            mode="task",
+            value=self.annotation_store.active_task_type(),
+            placeholder="preference",
+        )
+
     def action_show_help(self) -> None:
         self.push_screen(HelpModal())
 
@@ -508,7 +708,7 @@ class DataViewerApp(App[None]):
                 columns=self._ordered_row_columns(row),
                 focused_column=focused_column,
                 quick_label_map=(
-                    self.annotation_store.quick_label_map.copy() if self.annotation_store else {}
+                    self.annotation_store.active_hotkeys() if self.annotation_store else {}
                 ),
                 on_apply_label=lambda label: self._annotate_row(
                     row=row,
@@ -521,10 +721,11 @@ class DataViewerApp(App[None]):
     def _refresh_subtitle(self, last_action: str | None = None) -> None:
         total_rows_display = str(self._filtered_row_count)
         annotations_count = self.annotation_store.annotation_count() if self.annotation_store else 0
-        quick_labels = self.annotation_store.quick_label_map if self.annotation_store else {}
+        quick_labels = self.annotation_store.active_hotkeys() if self.annotation_store else {}
         quick_summary = ", ".join(f"{key}:{value}" for key, value in sorted(quick_labels.items()))
         if not quick_summary:
             quick_summary = "none"
+        task_display = self.annotation_store.active_task_type() if self.annotation_store else "none"
 
         filter_display = self._filter_query.raw if self._filter_query else "none"
         sort_display = (
@@ -540,12 +741,16 @@ class DataViewerApp(App[None]):
             f"| loaded {len(self._loaded_rows)} "
             f"| cols {len(visible_columns)}/{len(self._schema)} "
             f"| filter {filter_display} | sort {sort_display} "
-            f"| annotations {annotations_count} | quick {quick_summary}"
+            f"| task {task_display} | annotations {annotations_count} | quick {quick_summary}"
         )
-        if self._command_mode == "filter":
-            subtitle = f"{subtitle} | mode /"
-        elif self._command_mode == "command":
-            subtitle = f"{subtitle} | mode :"
+        mode_display = {
+            "filter": "/",
+            "command": ":",
+            "annotate": "a",
+            "task": "t",
+        }
+        if self._command_mode in mode_display:
+            subtitle = f"{subtitle} | mode {mode_display[self._command_mode]}"
         if last_action:
             subtitle = f"{subtitle} | last {last_action}"
         self.sub_title = subtitle
@@ -602,6 +807,10 @@ class DataViewerApp(App[None]):
             self._handle_filter_submit(text)
         elif mode == "command":
             self._handle_command_submit(text)
+        elif mode == "annotate":
+            self._handle_annotate_submit(text)
+        elif mode == "task":
+            self._handle_task_submit(text)
 
     def _handle_filter_submit(self, text: str) -> None:
         if not text:
@@ -639,6 +848,30 @@ class DataViewerApp(App[None]):
             return
         if command == "filter":
             self._handle_filter_submit(" ".join(args))
+            return
+        if command in {"annotate", "ann"}:
+            if not args:
+                self.notify("Usage: annotate <label>", severity="warning")
+                return
+            self._handle_annotate_submit(" ".join(args))
+            return
+        if command in {"label", "label-add"}:
+            if not args:
+                self.notify("Usage: label <name>", severity="warning")
+                return
+            self._register_label(" ".join(args), source="label")
+            return
+        if command == "labels":
+            self._notify_label_state()
+            return
+        if command in {"task", "profile"}:
+            if not args:
+                self._open_task_mode()
+                return
+            self._handle_task_submit(" ".join(args))
+            return
+        if command in {"tasks", "task-mode"}:
+            self._open_task_mode()
             return
         if command in {"clear-filter", "nofilter"}:
             self._filter_query = None
@@ -678,6 +911,32 @@ class DataViewerApp(App[None]):
             return
 
         self.notify(f"Unknown command: {command}", severity="warning")
+
+    def _handle_annotate_submit(self, text: str) -> None:
+        label = text.strip()
+        if not label:
+            return
+        row = self._current_row()
+        if row is None:
+            self.notify("No active row is selected.", severity="warning")
+            return
+        self._annotate_row(row=row, label=label, source="annotate")
+
+    def _handle_task_submit(self, text: str) -> None:
+        if not self.annotation_store:
+            self.notify("Annotation store is not configured.", severity="warning")
+            return
+        task_type = text.strip()
+        if not task_type:
+            return
+        try:
+            active = self.annotation_store.set_task_type(task_type)
+        except ValueError as exc:
+            self.notify(f"Invalid task type: {exc}", severity="warning")
+            return
+        self._refresh_subtitle(last_action=f"task {active}")
+        self.notify(f"Active task set to '{active}'.")
+        self._open_task_mode()
 
     def _command_sort(self, args: list[str]) -> None:
         if not args:
@@ -732,6 +991,69 @@ class DataViewerApp(App[None]):
             f"Visible columns ({len(visible)}): {', '.join(visible)} | Hidden: {hidden_text}",
             timeout=6,
         )
+
+    def _notify_label_state(self) -> None:
+        if not self.annotation_store:
+            self.notify("Annotation store is not configured.", severity="warning")
+            return
+        labels = self.annotation_store.labels()
+        quick_map = self.annotation_store.active_hotkeys()
+        quick_summary = ", ".join(f"{key}:{value}" for key, value in sorted(quick_map.items()))
+        quick_text = quick_summary if quick_summary else "none"
+        preview = ", ".join(labels[:8])
+        if len(labels) > 8:
+            preview = f"{preview}, +{len(labels) - 8} more"
+        self.notify(
+            (
+                f"Task '{self.annotation_store.active_task_type()}' | "
+                f"labels ({len(labels)}): {preview or 'none'} | "
+                f"quick {quick_text}"
+            ),
+            timeout=6,
+        )
+
+    def _open_task_mode(self) -> None:
+        if not self.annotation_store:
+            self.notify("Annotation store is not configured.", severity="warning")
+            return
+        self.push_screen(
+            TaskLabelModal(
+                get_state=self._task_mode_state,
+                on_add_label=self._add_label_from_task_mode,
+                on_switch_task=self._switch_task_from_task_mode,
+            )
+        )
+
+    def _task_mode_state(self) -> dict[str, Any]:
+        if not self.annotation_store:
+            return {
+                "active_task_type": "none",
+                "task_types": [],
+                "labels": [],
+                "hotkeys": {},
+            }
+        return {
+            "active_task_type": self.annotation_store.active_task_type(),
+            "task_types": self.annotation_store.task_types(),
+            "labels": self.annotation_store.labels(),
+            "hotkeys": self.annotation_store.active_hotkeys(),
+        }
+
+    def _add_label_from_task_mode(self, label: str) -> tuple[str, bool, str | None] | None:
+        result = self._register_label(label, source="task-mode")
+        if result is not None:
+            self._refresh_subtitle(last_action=f"task-label {result[0]}")
+        return result
+
+    def _switch_task_from_task_mode(self, task_type: str) -> bool:
+        if not self.annotation_store:
+            return False
+        try:
+            active = self.annotation_store.set_task_type(task_type)
+        except ValueError:
+            return False
+        self._refresh_subtitle(last_action=f"task {active}")
+        return True
 
     def _jump_to_row(self, raw_index: str) -> None:
         try:
@@ -905,10 +1227,52 @@ class DataViewerApp(App[None]):
         if not self.annotation_store:
             self.notify("Annotation store is not configured.", severity="warning")
             return False
-        self.annotation_store.append_annotation(row=row, label=label)
-        self._refresh_subtitle(last_action=f"{source} row {row.row_index} -> {label}")
-        self.notify(f"Annotated row {row.row_index} as '{label}'.")
+        registered = self._register_label(label, source=source)
+        if registered is None:
+            return False
+        normalized_label, added, assigned_hotkey = registered
+
+        self.annotation_store.append_annotation(row=row, label=normalized_label)
+        self._refresh_subtitle(last_action=f"{source} row {row.row_index} -> {normalized_label}")
+        if added and assigned_hotkey:
+            self.notify(
+                (
+                    f"Annotated row {row.row_index} as '{normalized_label}' "
+                    f"(new label, key {assigned_hotkey})."
+                )
+            )
+        elif added:
+            self.notify(
+                (
+                    f"Annotated row {row.row_index} as '{normalized_label}' "
+                    "(new label, no quick key available)."
+                )
+            )
+        else:
+            self.notify(f"Annotated row {row.row_index} as '{normalized_label}'.")
         return True
+
+    def _register_label(self, label: str, source: str) -> tuple[str, bool, str | None] | None:
+        if not self.annotation_store:
+            self.notify("Annotation store is not configured.", severity="warning")
+            return None
+        try:
+            normalized, assigned_hotkey, created = self.annotation_store.ensure_label(label)
+        except ValueError as exc:
+            self.notify(f"Invalid label: {exc}", severity="warning")
+            return None
+
+        if created and source == "label":
+            if assigned_hotkey:
+                self.notify(f"Added label '{normalized}' on key {assigned_hotkey}.")
+            else:
+                self.notify(f"Added label '{normalized}' (no quick key available).")
+            self._refresh_subtitle(last_action=f"label {normalized}")
+        elif not created and source == "label":
+            self.notify(f"Label '{normalized}' already exists.")
+            self._refresh_subtitle(last_action=f"label {normalized}")
+
+        return normalized, created, assigned_hotkey
 
     def action_quick_label_1(self) -> None:
         self._apply_quick_label("1")

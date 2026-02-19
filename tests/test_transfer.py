@@ -162,6 +162,23 @@ def test_import_bundle_dry_run_does_not_modify_target_files(tmp_path: Path) -> N
     assert before_label_set == after_label_set
 
 
+def test_import_bundle_merges_task_profiles(tmp_path: Path) -> None:
+    target_store = _make_store(tmp_path / "target", quick_labels=("good", "bad"))
+    source_store = _make_store(tmp_path / "source", quick_labels=("good",))
+
+    source_store.set_task_type("classification")
+    source_store.ensure_label("entity-person")
+
+    result = import_bundle(target_store.bundle_dir, source_store.bundle_dir)
+    assert result["label_set_changed"] is True
+
+    merged_label_set = orjson.loads((target_store.bundle_dir / "label_set.json").read_bytes())
+    assert "task_profiles" in merged_label_set
+    assert "preference" in merged_label_set["task_profiles"]
+    assert "classification" in merged_label_set["task_profiles"]
+    assert merged_label_set["task_profiles"]["classification"]["labels"] == ["entity-person"]
+
+
 def test_summarize_bundle_reports_stats_duplicates_and_conflicts(tmp_path: Path) -> None:
     store = _make_store(tmp_path / "bundle")
     first = _append(store, "r1", "high-quality")
