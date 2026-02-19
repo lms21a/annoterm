@@ -112,6 +112,7 @@ class AnnotationBundleStore:
                 "key_fields": row.key_fields,
             },
             row_hash=row.row_hash,
+            row_data=dict(row.row_data),
             annotator=self.annotator,
             note=note,
             created_at=_now_iso(),

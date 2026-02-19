@@ -105,3 +105,5 @@ async def test_inspector_modal_can_apply_quick_label(tmp_path: Path) -> None:
     assert len(lines) == 1
     payload = orjson.loads(lines[0].encode("utf-8"))
     assert payload["label"] == "good"
+    assert payload["row_data"]["id"] == 0
+    assert payload["row_data"]["meta"] == "m-0"

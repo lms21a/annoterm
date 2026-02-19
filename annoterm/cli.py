@@ -18,6 +18,7 @@ from annoterm.annotations.transfer import (
     REQUIRED_BUNDLE_FILES,
     export_bundle,
     import_bundle,
+    summarize_bundle,
     validate_bundle_dir,
 )
 from annoterm.data.factory import create_adapter
@@ -94,6 +95,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Overwrite output path if it already exists.",
     )
     export_cmd.set_defaults(handler=_handle_export)
+
+    inspect_bundle_cmd = subparsers.add_parser(
+        "inspect-bundle",
+        help="Inspect annotation bundle metadata, counts, and sample records.",
+    )
+    inspect_bundle_cmd.add_argument("bundle_dir", help="Path to annotation bundle directory.")
+    inspect_bundle_cmd.add_argument(
+        "--limit",
+        type=int,
+        default=5,
+        help="Maximum number of annotation records to include in sample output.",
+    )
+    inspect_bundle_cmd.add_argument(
+        "--label",
+        default=None,
+        help="Optional label filter for summary counts and sample records.",
+    )
+    inspect_bundle_cmd.add_argument(
+        "--annotator",
+        default=None,
+        help="Optional annotator filter for summary counts and sample records.",
+    )
+    inspect_bundle_cmd.add_argument(
+        "--task-type",
+        default=None,
+        help="Optional task type filter for summary counts and sample records.",
+    )
+    inspect_bundle_cmd.set_defaults(handler=_handle_inspect_bundle)
 
     import_cmd = subparsers.add_parser("import", help="Import annotations from another bundle.")
     import_cmd.add_argument("target_bundle_dir", help="Target bundle directory to merge into.")
@@ -235,6 +264,18 @@ def _handle_export(args: argparse.Namespace) -> int:
         output_path=args.output,
         fmt=args.format,
         overwrite=bool(args.overwrite),
+    )
+    _print_json(result)
+    return 0
+
+
+def _handle_inspect_bundle(args: argparse.Namespace) -> int:
+    result = summarize_bundle(
+        bundle_dir=args.bundle_dir,
+        limit=max(args.limit, 0),
+        label=args.label,
+        annotator=args.annotator,
+        task_type=args.task_type,
     )
     _print_json(result)
     return 0

@@ -37,6 +37,7 @@ class AnnotationRecord:
     payload: dict[str, Any] = field(default_factory=dict)
     row_ref: dict[str, Any] = field(default_factory=dict)
     row_hash: str = ""
+    row_data: dict[str, Any] = field(default_factory=dict)
     annotator: str = "unknown"
     note: str | None = None
     created_at: str = ""

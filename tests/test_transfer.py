@@ -8,7 +8,7 @@ import orjson
 import pytest
 
 from annoterm.annotations.io import AnnotationBundleStore
-from annoterm.annotations.transfer import export_bundle, import_bundle
+from annoterm.annotations.transfer import export_bundle, import_bundle, summarize_bundle
 from annoterm.data.identity import build_row_record
 from annoterm.models import DatasetMeta
 
@@ -160,3 +160,50 @@ def test_import_bundle_dry_run_does_not_modify_target_files(tmp_path: Path) -> N
     assert result["label_set_changed"] is True
     assert before_annotations == after_annotations
     assert before_label_set == after_label_set
+
+
+def test_summarize_bundle_reports_stats_duplicates_and_conflicts(tmp_path: Path) -> None:
+    store = _make_store(tmp_path / "bundle")
+    first = _append(store, "r1", "high-quality")
+    _append(store, "r2", "low-quality")
+    _append(store, "r2", "high-quality")
+
+    duplicate_payload = dataclasses.asdict(first)
+    with (store.bundle_dir / "annotations.jsonl").open("ab") as handle:
+        handle.write(orjson.dumps(duplicate_payload))
+        handle.write(b"\n")
+
+    summary = summarize_bundle(store.bundle_dir, limit=2)
+
+    assert summary["counts"]["total_records"] == 4
+    assert summary["counts"]["filtered_records"] == 4
+    assert summary["counts"]["duplicate_annotation_ids"] == 1
+    assert summary["counts"]["row_label_conflicts"] == 1
+    assert summary["stats"]["by_label"] == {"high-quality": 3, "low-quality": 1}
+    assert summary["stats"]["by_annotator"] == {"alice": 4}
+    assert len(summary["sample_records"]) == 2
+
+
+def test_summarize_bundle_applies_filters_case_insensitively(tmp_path: Path) -> None:
+    store = _make_store(tmp_path / "bundle")
+    _append(store, "r1", "high-quality")
+    bob_record = dataclasses.asdict(_append(store, "r2", "needs-review"))
+    bob_record["annotator"] = "bob"
+    bob_record["task_type"] = "classification"
+    bob_record["label"] = "entity-person"
+
+    with (store.bundle_dir / "annotations.jsonl").open("ab") as handle:
+        handle.write(orjson.dumps(bob_record))
+        handle.write(b"\n")
+
+    summary = summarize_bundle(
+        store.bundle_dir,
+        label="ENTITY-PERSON",
+        annotator="BoB",
+        task_type="classification",
+    )
+
+    assert summary["counts"]["total_records"] == 3
+    assert summary["counts"]["filtered_records"] == 1
+    assert summary["stats"]["by_label"] == {"entity-person": 1}
+    assert summary["stats"]["by_annotator"] == {"bob": 1}

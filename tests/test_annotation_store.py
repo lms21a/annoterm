@@ -70,6 +70,7 @@ def test_append_annotation_writes_one_jsonl_record(tmp_path: Path) -> None:
     assert payload["dataset_fingerprint"] == "sha256:dataset1"
     assert payload["row_ref"]["row_index"] == 4
     assert payload["row_ref"]["row_id"] == "r4"
+    assert payload["row_data"] == {"id": "r4", "text": "hello"}
     assert payload["label"] == "high-quality"
     assert store.annotation_count() == 1
 

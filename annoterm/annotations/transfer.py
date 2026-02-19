@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import tarfile
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -185,6 +186,100 @@ def import_bundle(
         "duplicate_count": duplicate_count,
         "conflict_count": conflict_count,
     }
+
+
+def summarize_bundle(
+    bundle_dir: str | Path,
+    limit: int = 5,
+    label: str | None = None,
+    annotator: str | None = None,
+    task_type: str | None = None,
+) -> dict[str, Any]:
+    bundle = validate_bundle_dir(bundle_dir)
+    manifest = _read_json(bundle / "manifest.json")
+    label_set = _read_json(bundle / "label_set.json")
+    all_records = load_annotations(bundle)
+
+    filtered_records = [
+        record
+        for record in all_records
+        if _record_matches_filter(
+            record,
+            label=label,
+            annotator=annotator,
+            task_type=task_type,
+        )
+    ]
+
+    by_label = Counter(str(record.get("label") or "") for record in filtered_records)
+    by_annotator = Counter(str(record.get("annotator") or "") for record in filtered_records)
+    by_task_type = Counter(str(record.get("task_type") or "") for record in filtered_records)
+    created_at_values = sorted(
+        str(record.get("created_at"))
+        for record in filtered_records
+        if record.get("created_at")
+    )
+    sample_size = max(limit, 0)
+    sample = filtered_records[:sample_size]
+
+    return {
+        "bundle_dir": str(bundle),
+        "manifest": manifest,
+        "label_set": label_set,
+        "filters": {
+            "label": label,
+            "annotator": annotator,
+            "task_type": task_type,
+        },
+        "counts": {
+            "total_records": len(all_records),
+            "filtered_records": len(filtered_records),
+            "duplicate_annotation_ids": _count_duplicate_annotation_ids(filtered_records),
+            "row_label_conflicts": _count_row_label_conflicts(filtered_records),
+        },
+        "stats": {
+            "by_label": dict(sorted((k, v) for k, v in by_label.items() if k)),
+            "by_annotator": dict(sorted((k, v) for k, v in by_annotator.items() if k)),
+            "by_task_type": dict(sorted((k, v) for k, v in by_task_type.items() if k)),
+            "first_created_at": created_at_values[0] if created_at_values else None,
+            "last_created_at": created_at_values[-1] if created_at_values else None,
+        },
+        "sample_records": sample,
+    }
+
+
+def _record_matches_filter(
+    record: dict[str, Any],
+    *,
+    label: str | None = None,
+    annotator: str | None = None,
+    task_type: str | None = None,
+) -> bool:
+    if label is not None:
+        record_label = str(record.get("label") or "").strip().lower()
+        if record_label != label.strip().lower():
+            return False
+
+    if annotator is not None:
+        record_annotator = str(record.get("annotator") or "").strip().lower()
+        if record_annotator != annotator.strip().lower():
+            return False
+
+    if task_type is not None:
+        record_task_type = str(record.get("task_type") or "").strip().lower()
+        if record_task_type != task_type.strip().lower():
+            return False
+
+    return True
+
+
+def _count_duplicate_annotation_ids(records: list[dict[str, Any]]) -> int:
+    counts: Counter[str] = Counter()
+    for record in records:
+        annotation_id = str(record.get("annotation_id") or "").strip()
+        if annotation_id:
+            counts[annotation_id] += 1
+    return sum(1 for count in counts.values() if count > 1)
 
 
 def _count_annotations(path: Path) -> int:

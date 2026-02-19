@@ -41,6 +41,7 @@ uv run --active annoterm open path/to/data.csv \
 In the viewer:
 - Press `1..9` to apply the configured quick label to the focused row.
 - Records are appended to `<bundle-dir>/annotations.jsonl`.
+- Each record stores `row_data` (a snapshot of the annotated row) so exports remain usable even if the original dataset path is gone.
 - Press `?` for an on-screen help modal with shortcuts and command reference.
 - Navigation keys: `j/k` (up/down), `ctrl+d/u` (page), `g/G` (top/bottom).
 - Press `Enter` to inspect the row in a popup, then use `Tab` / `Shift+Tab` to cycle columns.
@@ -84,6 +85,21 @@ Preview merge impact without writing files:
 
 ```bash
 uv run --active annoterm import .annoterm/my-bundle ./shared-bundle.tar.gz --dry-run
+```
+
+Inspect bundle metadata, stats, and sample records:
+
+```bash
+uv run --active annoterm inspect-bundle .annoterm/my-bundle --limit 10
+```
+
+Filter bundle inspection output:
+
+```bash
+uv run --active annoterm inspect-bundle .annoterm/my-bundle \
+  --label high-quality \
+  --annotator lukas928 \
+  --task-type preference
 ```
 
 The import command performs:
