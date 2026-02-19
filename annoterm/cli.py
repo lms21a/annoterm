@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import re
 import tarfile
 import tempfile
 from dataclasses import asdict
@@ -20,6 +21,7 @@ from annoterm.annotations.transfer import (
     validate_bundle_dir,
 )
 from annoterm.data.factory import create_adapter
+from annoterm.models import DatasetMeta
 from annoterm.ui.app import DataViewerApp
 
 
@@ -49,8 +51,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     open_cmd.add_argument(
         "--bundle-dir",
-        default=".annoterm/bundle",
-        help="Directory where manifest, label_set, and annotations.jsonl are stored.",
+        default=None,
+        help=(
+            "Optional explicit bundle directory. "
+            "If omitted, a dataset-specific path under .annoterm/bundles is used."
+        ),
     )
     open_cmd.add_argument(
         "--annotator",
@@ -156,6 +161,24 @@ def _print_json(payload: object) -> None:
     print(orjson.dumps(payload, option=orjson.OPT_INDENT_2).decode("utf-8"))
 
 
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", value).strip("_").lower()
+    return slug or "dataset"
+
+
+def _default_bundle_dir_for_meta(meta: DatasetMeta) -> Path:
+    if meta.source_type in {"csv", "jsonl"}:
+        source_name = Path(meta.source_uri).stem or Path(meta.source_uri).name
+    else:
+        source_name = meta.source_uri
+    if meta.split:
+        source_name = f"{source_name}_{meta.split}"
+
+    fingerprint = meta.fingerprint.split(":", maxsplit=1)[-1][:12]
+    slug = _slugify(source_name)
+    return Path(".annoterm") / "bundles" / f"{slug}_{fingerprint}"
+
+
 def _handle_inspect(args: argparse.Namespace) -> int:
     adapter = _create_adapter_from_args(args)
     meta = adapter.meta()
@@ -176,10 +199,12 @@ def _handle_inspect(args: argparse.Namespace) -> int:
 
 def _handle_open(args: argparse.Namespace) -> int:
     adapter = _create_adapter_from_args(args)
+    meta = adapter.meta()
+    bundle_dir = Path(args.bundle_dir) if args.bundle_dir else _default_bundle_dir_for_meta(meta)
     quick_labels = tuple(args.quick_labels) if args.quick_labels else DEFAULT_QUICK_LABELS
     store = AnnotationBundleStore(
-        bundle_dir=args.bundle_dir,
-        dataset_meta=adapter.meta(),
+        bundle_dir=bundle_dir,
+        dataset_meta=meta,
         annotator=args.annotator,
         task_type=args.task_type,
         quick_labels=quick_labels,
@@ -187,7 +212,13 @@ def _handle_open(args: argparse.Namespace) -> int:
     try:
         store.ensure_initialized()
     except ValueError as exc:
-        raise SystemExit(f"Failed to initialize annotation bundle: {exc}") from exc
+        suggested = _default_bundle_dir_for_meta(meta)
+        suggestion = (
+            ""
+            if args.bundle_dir is None
+            else f" Try a different bundle path, e.g. `--bundle-dir {suggested}`."
+        )
+        raise SystemExit(f"Failed to initialize annotation bundle: {exc}.{suggestion}") from exc
 
     app = DataViewerApp(
         adapter=adapter,

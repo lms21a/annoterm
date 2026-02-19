@@ -19,6 +19,14 @@ uv run --active annoterm inspect path/to/data.csv
 uv run --active annoterm open path/to/data.csv
 ```
 
+By default, `open` now creates/uses a dataset-specific bundle under:
+
+```text
+.annoterm/bundles/<dataset_slug>_<fingerprint12>/
+```
+
+This keeps annotations for different datasets separate automatically.
+
 ### Annotation bundle options
 
 ```bash
