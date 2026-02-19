@@ -152,6 +152,79 @@ class RowInspectModal(ModalScreen[None]):
     """
 
 
+class CommandInputModal(ModalScreen[str | None]):
+    """Popup command/filter input modal."""
+
+    BINDINGS = [
+        Binding("escape", "close", "Cancel"),
+        Binding("q", "close", "Cancel"),
+    ]
+
+    def __init__(
+        self,
+        mode: str,
+        initial_value: str,
+        placeholder: str,
+    ) -> None:
+        super().__init__()
+        self._mode = mode
+        self._initial_value = initial_value
+        self._placeholder = placeholder
+
+    def compose(self) -> ComposeResult:
+        mode_label = "Filter" if self._mode == "filter" else "Command"
+        prefix = "/" if self._mode == "filter" else ":"
+        with Container(id="command_modal"):
+            yield Static(f"{mode_label} ({prefix})", id="command_modal_title")
+            yield Input(
+                value=self._initial_value,
+                placeholder=self._placeholder,
+                id="command_modal_input",
+            )
+            yield Static(
+                "Enter to apply, Esc to cancel.",
+                id="command_modal_hint",
+            )
+
+    def on_mount(self) -> None:
+        self.query_one("#command_modal_input", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "command_modal_input":
+            self.dismiss(event.value)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+    CSS = """
+    CommandInputModal {
+        align: center middle;
+    }
+    #command_modal {
+        width: 84%;
+        max-width: 100;
+        height: auto;
+        border: tall $accent;
+        padding: 1;
+        background: $surface;
+        layout: vertical;
+    }
+    #command_modal_title {
+        width: 100%;
+        text-style: bold;
+        padding: 0 0 1 0;
+    }
+    #command_modal_input {
+        width: 100%;
+    }
+    #command_modal_hint {
+        width: 100%;
+        color: $text-muted;
+        padding: 1 0 0 0;
+    }
+    """
+
+
 class DataViewerApp(App[None]):
     """Viewer with virtual paging, filter/sort commands, and quick labels."""
 
@@ -208,7 +281,6 @@ class DataViewerApp(App[None]):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield DataTable(id="grid")
-        yield Input(placeholder="Type command and press Enter", id="command_input")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -217,9 +289,6 @@ class DataViewerApp(App[None]):
 
         self._schema = self.adapter.schema()
         self._schema_by_name = {column.name: column for column in self._schema}
-
-        command_input = self.query_one("#command_input", Input)
-        command_input.display = False
 
         self._refresh_grid(preserve_column=None)
 
@@ -230,24 +299,20 @@ class DataViewerApp(App[None]):
     def on_data_table_cell_selected(self, _: DataTable.CellSelected) -> None:
         self.action_inspect_current_row()
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        text = event.value.strip()
-        if self._command_mode == "filter":
-            self._handle_filter_submit(text)
-        elif self._command_mode == "command":
-            self._handle_command_submit(text)
-        self._close_command_input()
-
-    def on_input_blurred(self, _: Input.Blurred) -> None:
-        if self._command_mode is not None:
-            self._close_command_input()
-
     def action_open_filter_bar(self) -> None:
         current_filter = self._filter_query.raw if self._filter_query else ""
-        self._open_command_input(mode="filter", value=current_filter, placeholder="filter: column == value")
+        self._open_command_modal(
+            mode="filter",
+            value=current_filter,
+            placeholder="column == value",
+        )
 
     def action_open_command_bar(self) -> None:
-        self._open_command_input(mode="command", value="", placeholder="command: row 1200")
+        self._open_command_modal(
+            mode="command",
+            value="",
+            placeholder="row 1200",
+        )
 
     def action_show_help(self) -> None:
         self.push_screen(HelpModal())
@@ -270,9 +335,7 @@ class DataViewerApp(App[None]):
         self.push_screen(RowInspectModal(title=title, text=text))
 
     def _refresh_subtitle(self, last_action: str | None = None) -> None:
-        total_rows = self.adapter.row_count(filter_query=self._filter_query)
-        self._filtered_row_count = 0 if total_rows is None else int(total_rows)
-        total_rows_display = "?" if total_rows is None else str(total_rows)
+        total_rows_display = str(self._filtered_row_count)
         annotations_count = self.annotation_store.annotation_count() if self.annotation_store else 0
         quick_labels = self.annotation_store.quick_label_map if self.annotation_store else {}
         quick_summary = ", ".join(f"{key}:{value}" for key, value in sorted(quick_labels.items()))
@@ -295,6 +358,10 @@ class DataViewerApp(App[None]):
             f"| filter {filter_display} | sort {sort_display} "
             f"| annotations {annotations_count} | quick {quick_summary}"
         )
+        if self._command_mode == "filter":
+            subtitle = f"{subtitle} | mode /"
+        elif self._command_mode == "command":
+            subtitle = f"{subtitle} | mode :"
         if last_action:
             subtitle = f"{subtitle} | last {last_action}"
         self.sub_title = subtitle
@@ -378,20 +445,24 @@ class DataViewerApp(App[None]):
     def _visible_column_names(self) -> list[str]:
         return [column.name for column in self._schema if column.name not in self._hidden_columns]
 
-    def _open_command_input(self, mode: str, value: str, placeholder: str) -> None:
-        command_input = self.query_one("#command_input", Input)
-        command_input.display = True
-        command_input.value = value
-        command_input.placeholder = placeholder
+    def _open_command_modal(self, mode: str, value: str, placeholder: str) -> None:
         self._command_mode = mode
-        command_input.focus()
+        self._refresh_subtitle()
+        self.push_screen(
+            CommandInputModal(mode=mode, initial_value=value, placeholder=placeholder),
+            callback=lambda result: self._on_command_modal_dismiss(mode, result),
+        )
 
-    def _close_command_input(self) -> None:
-        command_input = self.query_one("#command_input", Input)
-        command_input.display = False
-        command_input.value = ""
+    def _on_command_modal_dismiss(self, mode: str, value: str | None) -> None:
         self._command_mode = None
-        self.query_one(DataTable).focus()
+        self._refresh_subtitle()
+        if value is None:
+            return
+        text = value.strip()
+        if mode == "filter":
+            self._handle_filter_submit(text)
+        elif mode == "command":
+            self._handle_command_submit(text)
 
     def _handle_filter_submit(self, text: str) -> None:
         if not text:

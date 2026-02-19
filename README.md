@@ -48,6 +48,7 @@ In the viewer:
 - Columns: `c` hides current column, `C` restores all columns.
 - Reset view state: `r`.
 - Filter bar: `/` then enter expression like `score >= 0.6 and text contains "beta"`.
+- `/` and `:` open a centered popup input modal so typing stays visible even in tmux.
 - Command bar: `:` then run commands such as:
   - `row 1200`
   - `sort score desc`
