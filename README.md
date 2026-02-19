@@ -32,7 +32,7 @@ This keeps annotations for different datasets separate automatically.
 ```bash
 uv run --active annoterm open path/to/data.csv \
   --bundle-dir .annoterm/my-bundle \
-  --annotator lukas928 \
+  --annotator your_name \
   --quick-label high-quality \
   --quick-label low-quality \
   --quick-label needs-review
@@ -111,7 +111,7 @@ Filter bundle inspection output:
 ```bash
 uv run --active annoterm inspect-bundle .annoterm/my-bundle \
   --label high-quality \
-  --annotator lukas928 \
+  --annotator your_name \
   --task-type preference
 ```
 
