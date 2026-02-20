@@ -1,6 +1,6 @@
 ## AnnoTerm
 
-Keyboard-first TUI for exploring and annotating data sources.
+Keyboard-first TUI for exploring and annotating data sources. Goal is to improve data quality passively while inspecting model outputs such as RL rollouts.
 
 Current baseline:
 - CSV adapter
