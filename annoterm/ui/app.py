@@ -222,12 +222,7 @@ class RowInspectModal(ModalScreen[None]):
             return
         if self._on_apply_label is None:
             return
-        applied = self._on_apply_label(label)
-        if applied:
-            self.notify(
-                f"Annotated row {self._row.row_index} as '{label}'.",
-                timeout=2,
-            )
+        self._on_apply_label(label)
 
     def action_apply_label_1(self) -> None:
         self._apply_label_key("1")
