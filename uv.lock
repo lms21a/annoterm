@@ -138,14 +138,23 @@ wheels = [
 [[package]]
 name = "annoterm"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "datasets" },
     { name = "orjson" },
     { name = "polars" },
     { name = "pydantic" },
-    { name = "pytest" },
     { name = "textual" },
+]
+
+[package.optional-dependencies]
+test = [
+    { name = "pytest" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "annoterm" },
 ]
 
 [package.metadata]
@@ -154,9 +163,13 @@ requires-dist = [
     { name = "orjson", specifier = ">=3.11.7" },
     { name = "polars", specifier = ">=1.38.1" },
     { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=9.0.2" },
     { name = "textual", specifier = ">=8.0.0" },
 ]
+provides-extras = ["test"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "annoterm", editable = "." }]
 
 [[package]]
 name = "anyio"
