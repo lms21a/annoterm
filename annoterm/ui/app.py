@@ -1199,10 +1199,23 @@ class DataViewerApp(App[None]):
             self._refresh_grid(last_action="filter cleared")
             return
         try:
-            self._filter_query = parse_filter_expression(text)
+            query = parse_filter_expression(text)
         except ValueError as exc:
             self.notify(f"Invalid filter: {exc}", severity="error")
             return
+        if query is not None:
+            invalid_columns = [
+                condition.column
+                for condition in query.conditions
+                if condition.column not in self._schema_by_name
+            ]
+            if invalid_columns:
+                unknown_columns = ", ".join(dict.fromkeys(invalid_columns))
+                self.notify(f"Unknown column(s): {unknown_columns}", severity="error")
+                return
+            self._filter_query = query
+        else:
+            self._filter_query = None
         self._view_row_position = 0
         self._refresh_grid(last_action=f"filter {text}")
 
