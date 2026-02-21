@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import io
+import shlex
 import re
 import tarfile
 import tempfile
@@ -23,12 +25,13 @@ from annoterm.annotations.transfer import (
 )
 from annoterm.data.factory import create_adapter
 from annoterm.models import DatasetMeta
-from annoterm.ui.app import DataViewerApp
+from annoterm.ui.app import DataViewerApp, HomeLauncherApp
+from contextlib import redirect_stderr, redirect_stdout
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def _build_parser(require_command: bool = True) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="annoterm", description="View and annotate tabular data.")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command", required=require_command)
 
     inspect_cmd = _add_common_source_args(
         subparsers.add_parser("inspect", help="Print schema and sample rows.")
@@ -143,6 +146,17 @@ def _build_parser() -> argparse.ArgumentParser:
     import_cmd.set_defaults(handler=_handle_import)
 
     return parser
+
+
+def _tokenize_home_command(raw_command: str) -> list[str]:
+    value = (raw_command or "").strip()
+    if not value:
+        return []
+    if value.startswith("/"):
+        value = value[1:].strip()
+    if not value:
+        return []
+    return shlex.split(value)
 
 
 def _add_common_source_args(command: argparse.ArgumentParser) -> argparse.ArgumentParser:
@@ -335,9 +349,57 @@ def _handle_import(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_home_command(raw_command: str) -> str:
+    tokens = _tokenize_home_command(raw_command)
+    if not tokens:
+        return "No command entered."
+
+    parser = _build_parser(require_command=False)
+    parse_output = io.StringIO()
+    try:
+        with redirect_stdout(parse_output), redirect_stderr(parse_output):
+            parsed = parser.parse_args(tokens)
+    except SystemExit:
+        message = parse_output.getvalue().strip()
+        return message or "Invalid command."
+
+    handler = getattr(parsed, "handler", None)
+    if handler is None:
+        return "Available commands: open, inspect, inspect-bundle, export, import."
+
+    if parsed.command == "open":
+        try:
+            _handle_open(parsed)
+        except SystemExit as exc:
+            return str(exc)
+        return "Returned from open."
+
+    command_output = io.StringIO()
+    try:
+        with redirect_stdout(command_output), redirect_stderr(command_output):
+            handler(parsed)
+    except Exception as exc:
+        return f"{type(exc).__name__}: {exc}"
+
+    return command_output.getvalue().strip() or f"{parsed.command} completed."
+
+
+def _run_home_mode() -> int:
+    status = None
+    while True:
+        app = HomeLauncherApp(status=status)
+        app.run()
+        command = app.requested_command
+        if command is None:
+            return 0
+        status = _run_home_command(command)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = _build_parser()
+    parser = _build_parser(require_command=False)
     args = parser.parse_args(argv)
+    if args.command is None:
+        return _run_home_mode()
     return int(args.handler(args))
 
 

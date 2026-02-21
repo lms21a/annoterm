@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import shlex
+import shutil
+import subprocess
+import sys
 from typing import Any, Callable
 
 import orjson
@@ -27,6 +31,7 @@ h / l: move column
 ctrl+d / ctrl+u: page down / up
 g / G: top / bottom
 Enter: inspect row (Tab / Shift+Tab to move columns)
+In inspect modal, Ctrl+C copies current entry to clipboard.
 
 [b]View Controls[/b]
 /: open filter input
@@ -63,6 +68,187 @@ help
 Press Esc, q, Enter, or ? to close this help.
 """
 
+HOME_COMMAND_TEXT = """[b]AnnoTerm Home[/b]
+
+Type a command to launch an action.
+
+Available commands:
+
+1) /open <source> [options]
+   Open a dataset in the annotation viewer.
+
+2) /inspect <source> [options]
+   Show dataset schema and sample rows.
+
+3) /inspect-bundle <bundle-dir>
+   Show bundle summary and samples.
+
+4) /export <bundle-dir> <output> [--format dir|tar]
+   Export a bundle.
+
+5) /import <target-bundle> <source-bundle-or-tar>
+   Merge another bundle into a target.
+
+Start a command with / when you want quick visibility:
+- /open path/to/data.csv
+- /inspect-bundle .annoterm/my-bundle
+
+Escape or q to quit.
+"""
+
+
+_PATH_AUTOCOMPLETE_COMMANDS = {
+    "open",
+    "inspect",
+    "inspect-bundle",
+    "export",
+    "import",
+}
+_MAX_PATH_COMPLETION_PREVIEW = 6
+
+
+def _complete_path_in_command(value: str, cursor_position: int) -> tuple[str, int, list[str]]:
+    if cursor_position < 0:
+        cursor_position = 0
+    if cursor_position > len(value):
+        cursor_position = len(value)
+
+    before = value[:cursor_position]
+    if not before.strip():
+        return value, cursor_position, []
+
+    tokens = before.split()
+    if not tokens:
+        return value, cursor_position, []
+
+    command = tokens[0].lstrip("/").lower()
+    if command not in _PATH_AUTOCOMPLETE_COMMANDS:
+        return value, cursor_position, []
+
+    if before[-1].isspace():
+        token_index = len(tokens)
+    else:
+        token_index = len(tokens) - 1
+    if token_index <= 0:
+        return value, cursor_position, []
+
+    if before[-1].isspace():
+        token_start = cursor_position
+        token_end = cursor_position
+    else:
+        token_start = cursor_position
+        while token_start > 0 and not before[token_start - 1].isspace():
+            token_start -= 1
+        token_end = cursor_position
+        while token_end < len(value) and not value[token_end].isspace():
+            token_end += 1
+
+    token = value[token_start:token_end]
+
+    quote = ""
+    if token and token[0] in {'"', "'"} and token.count(token[0]) % 2 == 1:
+        quote = token[0]
+        token = token[1:]
+
+    expanded = os.path.expanduser(token)
+    if expanded.endswith(os.sep):
+        search_dir = expanded
+        stem = ""
+        raw_prefix = token
+    else:
+        search_dir = os.path.dirname(expanded)
+        stem = os.path.basename(expanded)
+        if not search_dir:
+            search_dir = "."
+        raw_prefix = token[: len(token) - len(stem)] if stem else token
+
+    if not os.path.isdir(search_dir):
+        return value, cursor_position, []
+
+    dir_matches: list[str] = []
+    file_matches: list[str] = []
+    for entry in sorted(os.listdir(search_dir)):
+        if not entry.startswith(stem):
+            continue
+        expanded_entry = os.path.join(search_dir, entry)
+        candidate = f"{raw_prefix}{entry}"
+        if os.path.isdir(expanded_entry):
+            candidate += os.sep
+            if quote:
+                candidate = f"{quote}{candidate}"
+            dir_matches.append(candidate)
+            continue
+        if quote:
+            candidate = f"{quote}{candidate}"
+        file_matches.append(candidate)
+
+    matches = sorted(dir_matches) + sorted(file_matches)
+
+    if not matches:
+        return value, cursor_position, []
+
+    if len(matches) > 1:
+        return value, cursor_position, matches
+
+    completion = matches[0]
+
+    if completion == token and not quote:
+        return value, cursor_position, matches
+
+    new_value = value[:token_start] + completion + value[token_end:]
+    new_cursor = token_start + len(completion)
+    return new_value, new_cursor, matches
+
+
+def _format_completion_matches(matches: list[str]) -> str:
+    if not matches:
+        return ""
+    preview = matches[:_MAX_PATH_COMPLETION_PREVIEW]
+    lines = [match for match in preview]
+    remaining = len(matches) - len(preview)
+    if remaining > 0:
+        lines.append(f"... and {remaining} more")
+    return "\n".join(lines)
+
+
+class PathCompletionInput(Input):
+    """Input with shell-like path completion triggered by Tab."""
+
+    def __init__(
+        self,
+        *args: Any,
+        on_completions: Callable[[list[str]], None] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._on_completions = on_completions
+
+    BINDINGS = [Binding("tab", "complete_path", "Complete path", show=False)]
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        del event
+        self._notify_completions([])
+
+    def action_complete_path(self) -> None:
+        new_value, new_cursor, matches = _complete_path_in_command(
+            self.value,
+            self.cursor_position,
+        )
+        if not matches:
+            self._notify_completions([])
+            return
+        if new_value == self.value:
+            self._notify_completions(matches)
+            return
+        self.value = new_value
+        self.cursor_position = new_cursor
+        self._notify_completions([])
+
+    def _notify_completions(self, matches: list[str]) -> None:
+        if self._on_completions is None:
+            return
+        self._on_completions(matches)
+
 
 def _format_value_for_inspector(value: Any) -> str:
     if value is None:
@@ -76,6 +262,62 @@ def _format_value_for_inspector(value: Any) -> str:
         except TypeError:
             return str(value)
     return str(value)
+
+
+def _run_clipboard_command(command: list[str], text: str) -> bool:
+    try:
+        process = subprocess.run(
+            command,
+            input=text,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:
+        return False
+    return process.returncode == 0
+
+
+def _copy_text_to_clipboard(text: str) -> bool:
+    """Try to copy text to the OS clipboard."""
+    if sys.platform == "darwin":
+        if _run_clipboard_command(["pbcopy"], text):
+            return True
+    elif sys.platform == "win32":
+        if _run_clipboard_command(["clip"], text):
+            return True
+    else:
+        for command in (
+            ["wl-copy"],
+            ["xclip", "-selection", "clipboard"],
+            ["xsel", "--clipboard", "--input"],
+        ):
+            if shutil.which(command[0]) is None:
+                continue
+            if _run_clipboard_command(command, text):
+                return True
+
+    try:
+        import tkinter
+    except Exception:
+        return False
+    root = None
+    try:
+        root = tkinter.Tk()
+        root.withdraw()
+        root.clipboard_clear()
+        root.clipboard_append(text)
+        root.update()
+        root.destroy()
+        return True
+    except Exception:
+        try:
+            if root is not None:
+                root.destroy()
+        except Exception:
+            pass
+        return False
 
 
 class HelpModal(ModalScreen[None]):
@@ -114,6 +356,109 @@ class HelpModal(ModalScreen[None]):
     """
 
 
+class HomeLauncherApp(App[None]):
+    """Home screen shown when no command is provided."""
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("q", "close", "Close"),
+        Binding("question_mark", "close", "Close"),
+    ]
+
+    def __init__(self, status: str | None = None) -> None:
+        super().__init__()
+        self._status = status or ""
+        self._requested_command: str | None = None
+
+    @property
+    def requested_command(self) -> str | None:
+        return self._requested_command
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=False, id="home_header")
+        with Container(id="home_screen"):
+            yield Static(HOME_COMMAND_TEXT, id="home_command_text")
+            if self._status:
+                yield Static(self._status, id="home_status")
+            yield PathCompletionInput(
+                value="",
+                placeholder="/open path/to/data.csv",
+                on_completions=self._show_home_completions,
+                id="home_command_input",
+            )
+            yield Static("", id="home_command_completions")
+            yield Static(
+                "Press Enter to run • Esc or q to quit",
+                id="home_hint",
+            )
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.query_one("#home_command_input", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "home_command_input":
+            return
+        command = event.value.strip()
+        if not command:
+            self.notify("Enter a command to run.")
+            return
+        self._requested_command = command
+        self.exit()
+
+    def action_close(self) -> None:
+        self._requested_command = None
+        self.exit()
+
+    def _show_home_completions(self, matches: list[str]) -> None:
+        completion = self.query_one("#home_command_completions", Static)
+        if not matches:
+            completion.update("")
+            return
+        completion.update(_format_completion_matches(matches))
+
+    CSS = """
+    HomeLauncherApp {
+        align: left top;
+    }
+    #home_screen {
+        width: 100%;
+        max-width: 100%;
+        padding: 1 1 1 1;
+        layout: vertical;
+        min-height: 28;
+    }
+    #home_command_text {
+        width: 100%;
+        color: $text;
+        padding: 0 1 1 1;
+    }
+    #home_status {
+        width: 100%;
+        color: $text;
+        padding: 0 1 1 1;
+        max-height: 6;
+        overflow-y: auto;
+    }
+    #home_command_input {
+        width: 100%;
+        margin: 0 0 1 0;
+    }
+    #home_command_completions {
+        width: 100%;
+        color: $text-muted;
+        padding: 0 1 1 1;
+        max-height: 10;
+        overflow-y: auto;
+    }
+    #home_hint {
+        width: 100%;
+        color: $text-muted;
+        padding: 1 0 0 0;
+    }
+    """
+
+
 class RowInspectModal(ModalScreen[None]):
     """Modal for row-level inspection with per-column value browsing."""
 
@@ -123,6 +468,7 @@ class RowInspectModal(ModalScreen[None]):
         Binding("enter", "close", "Close"),
         Binding("tab,right", "next_column", "Next Column", show=False, priority=True),
         Binding("shift+tab,left", "previous_column", "Prev Column", show=False, priority=True),
+        Binding("ctrl+c", "copy_entry", "Copy Value", show=False, priority=True),
         Binding("home", "first_column", "First Column", show=False, priority=True),
         Binding("end", "last_column", "Last Column", show=False, priority=True),
         Binding("1", "apply_label_1", "Label 1", show=False, priority=True),
@@ -171,11 +517,11 @@ class RowInspectModal(ModalScreen[None]):
                 read_only=True,
                 show_cursor=False,
                 show_line_numbers=False,
-                soft_wrap=False,
+                soft_wrap=True,
                 id="row_inspect_text",
             )
             yield Static(
-                "Tab/Shift+Tab: change column | Enter/Esc/q: close",
+                "Tab/Shift+Tab: change column | Ctrl+C: copy value | Enter/Esc/q: close",
                 id="row_inspect_hint",
             )
 
@@ -203,6 +549,21 @@ class RowInspectModal(ModalScreen[None]):
             return
         self._column_index = (self._column_index - 1) % len(self._columns)
         self._refresh_content()
+
+    def _current_entry_value(self) -> str:
+        if not self._columns:
+            return ""
+        column = self._columns[self._column_index]
+        return _format_value_for_inspector(self._row.row_data.get(column))
+
+    def action_copy_entry(self) -> None:
+        if not self._columns:
+            return
+        value_text = self._current_entry_value()
+        if _copy_text_to_clipboard(value_text):
+            self.notify(f"Copied {self.current_column_name} to clipboard.")
+        else:
+            self.notify("Clipboard not available.", severity="error")
 
     def action_first_column(self) -> None:
         if not self._columns:
@@ -262,18 +623,18 @@ class RowInspectModal(ModalScreen[None]):
         else:
             column = self._columns[self._column_index]
             column_meta = f"Column {self._column_index + 1}/{len(self._columns)}: {column}"
-            value_text = _format_value_for_inspector(self._row.row_data.get(column))
+            value_text = self._current_entry_value()
 
         quick_summary = ", ".join(
             f"{key}:{value}" for key, value in sorted(self._quick_label_map.items())
         )
         if quick_summary:
             hint = (
-                "Tab/Shift+Tab: change column | 1..9: annotate row | "
+                "Tab/Shift+Tab: change column | Ctrl+C: copy value | 1..9: annotate row | "
                 f"labels {quick_summary} | Enter/Esc/q: close"
             )
         else:
-            hint = "Tab/Shift+Tab: change column | Enter/Esc/q: close"
+            hint = "Tab/Shift+Tab: change column | Ctrl+C: copy value | Enter/Esc/q: close"
 
         self.query_one("#row_inspect_title", Static).update(title)
         self.query_one("#row_inspect_column_meta", Static).update(column_meta)
@@ -352,11 +713,13 @@ class CommandInputModal(ModalScreen[str | None]):
             prefix = ""
         with Container(id="command_modal"):
             yield Static(f"{mode_label} ({prefix})", id="command_modal_title")
-            yield Input(
+            yield PathCompletionInput(
                 value=self._initial_value,
                 placeholder=self._placeholder,
+                on_completions=self._show_command_completions,
                 id="command_modal_input",
             )
+            yield Static("", id="command_modal_completions")
             yield Static(
                 "Enter to apply, Esc to cancel.",
                 id="command_modal_hint",
@@ -371,6 +734,13 @@ class CommandInputModal(ModalScreen[str | None]):
 
     def action_close(self) -> None:
         self.dismiss(None)
+
+    def _show_command_completions(self, matches: list[str]) -> None:
+        completion = self.query_one("#command_modal_completions", Static)
+        if not matches:
+            completion.update("")
+            return
+        completion.update(_format_completion_matches(matches))
 
     CSS = """
     CommandInputModal {
@@ -392,6 +762,13 @@ class CommandInputModal(ModalScreen[str | None]):
     }
     #command_modal_input {
         width: 100%;
+    }
+    #command_modal_completions {
+        width: 100%;
+        color: $text-muted;
+        padding: 1 0 0 0;
+        max-height: 10;
+        overflow-y: auto;
     }
     #command_modal_hint {
         width: 100%;
@@ -649,7 +1026,7 @@ class DataViewerApp(App[None]):
         self._open_command_modal(
             mode="filter",
             value=current_filter,
-            placeholder="column == value",
+            placeholder="column == value && category >= 5",
         )
 
     def action_contains_filter_current_column(self) -> None:
@@ -822,10 +1199,23 @@ class DataViewerApp(App[None]):
             self._refresh_grid(last_action="filter cleared")
             return
         try:
-            self._filter_query = parse_filter_expression(text)
+            query = parse_filter_expression(text)
         except ValueError as exc:
             self.notify(f"Invalid filter: {exc}", severity="error")
             return
+        if query is not None:
+            invalid_columns = [
+                condition.column
+                for condition in query.conditions
+                if condition.column not in self._schema_by_name
+            ]
+            if invalid_columns:
+                unknown_columns = ", ".join(dict.fromkeys(invalid_columns))
+                self.notify(f"Unknown column(s): {unknown_columns}", severity="error")
+                return
+            self._filter_query = query
+        else:
+            self._filter_query = None
         self._view_row_position = 0
         self._refresh_grid(last_action=f"filter {text}")
 

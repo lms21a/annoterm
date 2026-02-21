@@ -17,7 +17,12 @@ Current baseline:
 source ../.venv/bin/activate
 uv run --active annoterm inspect path/to/data.csv
 uv run --active annoterm open path/to/data.csv
+python3 -m annoterm
 ```
+
+Running `python3 -m annoterm` with no arguments opens the launcher home UI with the
+list of supported commands (`/open`, `/inspect`, `/inspect-bundle`, `/export`,
+`/import`) so you can quickly launch an action from one screen.
 
 By default, `open` now creates/uses a dataset-specific bundle under:
 
@@ -45,6 +50,7 @@ In the viewer:
 - Press `?` for an on-screen help modal with shortcuts and command reference.
 - Navigation keys: `j/k` (up/down), `ctrl+d/u` (page), `g/G` (top/bottom).
 - Press `Enter` to inspect the row in a popup, then use `Tab` / `Shift+Tab` to cycle columns.
+- In inspect mode, press `Ctrl+C` to copy the currently selected cell value.
 - In row inspect mode, `1..9` also applies quick-label annotations.
 - Press `a` to annotate the current row with any label (new labels are added automatically).
 - Press `t` to open task label mode (shows your current tasks immediately).
@@ -52,7 +58,7 @@ In the viewer:
 - Sorting: `s` toggles sort on the focused column.
 - Columns: `c` hides current column, `C` restores all columns.
 - Reset view state: `r`.
-- Filter bar: `/` then enter expression like `score >= 0.6 and text contains "beta"`.
+- Filter bar: `/` then enter an expression like `score >= 0.6 and text contains "beta"` or `score >= 0.6 && text contains "beta"`.
 - Quick column search: `f` opens a `contains` filter pre-filled for the currently selected column.
 - `/` and `:` open a centered popup input modal so typing stays visible even in tmux.
 - Command bar: `:` then run commands such as:

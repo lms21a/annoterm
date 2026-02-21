@@ -72,3 +72,13 @@ async def test_f_opens_contains_filter_for_current_column() -> None:
         assert modal.__class__.__name__ == "CommandInputModal"
         input_widget = modal.query_one("#command_modal_input", Input)
         assert input_widget.value == "id contains "
+
+
+@pytest.mark.anyio
+async def test_invalid_filter_column_is_not_applied() -> None:
+    app = DataViewerApp(adapter=_FilterAdapter(), load_rows=2)
+    async with app.run_test() as pilot:
+        await pilot.press("/", "x", "y", "z", " ", "=", "=", " ", "1", "enter")
+
+        assert app._filter_query is None
+        assert app.screen_stack[-1].__class__.__name__ != "CommandInputModal"
