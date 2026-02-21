@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "annoterm"
-version = "0.1.0"
+version = "0.1.1"
 description = "Keyboard-first TUI for viewing and annotating tabular data."
 readme = "README.md"
 requires-python = ">=3.12"
