@@ -6,28 +6,50 @@ from typing import Any
 
 import polars as pl
 
-from annoterm.filters.parser import FilterCondition, FilterQuery
+from annoterm.filters.parser import FilterCondition, FilterLogical, FilterQuery
 
 
 def row_matches_filter(row_data: dict[str, Any], query: FilterQuery | None) -> bool:
     if query is None:
         return True
-    for condition in query.conditions:
-        if not _match_condition(row_data.get(condition.column), condition):
-            return False
-    return True
+    return _match_expression(row_data=row_data, expression=query.expression)
+
+
+def _match_expression(
+    row_data: dict[str, Any],
+    expression: FilterCondition | FilterLogical,
+) -> bool:
+    if isinstance(expression, FilterLogical):
+        if expression.operator == "and":
+            return _match_expression(
+                row_data=row_data,
+                expression=expression.left,
+            ) and _match_expression(row_data=row_data, expression=expression.right)
+        if expression.operator == "or":
+            return _match_expression(
+                row_data=row_data,
+                expression=expression.left,
+            ) or _match_expression(row_data=row_data, expression=expression.right)
+        raise ValueError(f"Unsupported operator: {expression.operator}")
+    return _match_condition(row_data.get(expression.column), expression)
 
 
 def to_polars_expression(query: FilterQuery | None) -> pl.Expr | None:
     if query is None:
         return None
-    expressions = [_condition_to_expr(condition) for condition in query.conditions]
-    if not expressions:
-        return None
-    expr = expressions[0]
-    for next_expr in expressions[1:]:
-        expr = expr & next_expr
-    return expr
+    return _expression_to_polars(query.expression)
+
+
+def _expression_to_polars(expression: FilterCondition | FilterLogical) -> pl.Expr:
+    if isinstance(expression, FilterLogical):
+        left_expr = _expression_to_polars(expression.left)
+        right_expr = _expression_to_polars(expression.right)
+        if expression.operator == "and":
+            return left_expr & right_expr
+        if expression.operator == "or":
+            return left_expr | right_expr
+        raise ValueError(f"Unsupported operator: {expression.operator}")
+    return _condition_to_expr(expression)
 
 
 def _condition_to_expr(condition: FilterCondition) -> pl.Expr:

@@ -649,7 +649,7 @@ class DataViewerApp(App[None]):
         self._open_command_modal(
             mode="filter",
             value=current_filter,
-            placeholder="column == value",
+            placeholder="column == value && category >= 5",
         )
 
     def action_contains_filter_current_column(self) -> None:

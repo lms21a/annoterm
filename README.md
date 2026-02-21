@@ -52,7 +52,7 @@ In the viewer:
 - Sorting: `s` toggles sort on the focused column.
 - Columns: `c` hides current column, `C` restores all columns.
 - Reset view state: `r`.
-- Filter bar: `/` then enter expression like `score >= 0.6 and text contains "beta"`.
+- Filter bar: `/` then enter an expression like `score >= 0.6 and text contains "beta"` or `score >= 0.6 && text contains "beta"`.
 - Quick column search: `f` opens a `contains` filter pre-filled for the currently selected column.
 - `/` and `:` open a centered popup input modal so typing stays visible even in tmux.
 - Command bar: `:` then run commands such as:

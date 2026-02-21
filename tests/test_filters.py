@@ -25,6 +25,34 @@ def test_row_matches_filter_handles_numeric_and_string_ops() -> None:
     assert row_matches_filter({"score": 0.9, "text": "world"}, query) is False
 
 
+def test_parse_filter_expression_supports_symbolic_logical_ops() -> None:
+    query = parse_filter_expression("score >= 0.7 && category == 'x' || text contains 'alpha'")
+    assert query is not None
+    assert len(query.conditions) == 3
+
+    assert row_matches_filter({"score": 0.9, "category": "x", "text": "beta"}, query) is True
+    assert row_matches_filter({"score": 0.6, "category": "x", "text": "alpha"}, query) is True
+    assert row_matches_filter({"score": 0.6, "category": "y", "text": "alpha"}, query) is True
+    assert row_matches_filter({"score": 0.6, "category": "y", "text": "beta"}, query) is False
+
+
+def test_parse_filter_expression_supports_parentheses_precedence() -> None:
+    query = parse_filter_expression(
+        "(score > 0.7 and category == 'x') || text contains 'alpha'"
+    )
+    assert query is not None
+    assert len(query.conditions) == 3
+
+    assert (
+        row_matches_filter({"score": 0.6, "category": "x", "text": "beta"}, query)
+        is False
+    )
+    assert (
+        row_matches_filter({"score": 0.6, "category": "y", "text": "alpha"}, query)
+        is True
+    )
+
+
 def test_parse_filter_invalid_clause_raises() -> None:
     try:
         parse_filter_expression("badclause")
