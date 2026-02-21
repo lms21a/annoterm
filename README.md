@@ -17,7 +17,12 @@ Current baseline:
 source ../.venv/bin/activate
 uv run --active annoterm inspect path/to/data.csv
 uv run --active annoterm open path/to/data.csv
+python3 -m annoterm
 ```
+
+Running `python3 -m annoterm` with no arguments opens the launcher home UI with the
+list of supported commands (`/open`, `/inspect`, `/inspect-bundle`, `/export`,
+`/import`) so you can quickly launch an action from one screen.
 
 By default, `open` now creates/uses a dataset-specific bundle under:
 

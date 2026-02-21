@@ -67,6 +67,34 @@ help
 Press Esc, q, Enter, or ? to close this help.
 """
 
+HOME_COMMAND_TEXT = """[b]AnnoTerm Home[/b]
+
+Type a command to launch an action.
+
+Available commands:
+
+1) /open <source> [options]
+   Open a dataset in the annotation viewer.
+
+2) /inspect <source> [options]
+   Show dataset schema and sample rows.
+
+3) /inspect-bundle <bundle-dir>
+   Show bundle summary and samples.
+
+4) /export <bundle-dir> <output> [--format dir|tar]
+   Export a bundle.
+
+5) /import <target-bundle> <source-bundle-or-tar>
+   Merge another bundle into a target.
+
+Start a command with / when you want quick visibility:
+- /open path/to/data.csv
+- /inspect-bundle .annoterm/my-bundle
+
+Escape or q to quit.
+"""
+
 
 def _format_value_for_inspector(value: Any) -> str:
     if value is None:
@@ -170,6 +198,93 @@ class HelpModal(ModalScreen[None]):
     }
     #help_text {
         width: 100%;
+    }
+    """
+
+
+class HomeLauncherApp(App[None]):
+    """Home screen shown when no command is provided."""
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+        Binding("q", "close", "Close"),
+        Binding("question_mark", "close", "Close"),
+    ]
+
+    def __init__(self, status: str | None = None) -> None:
+        super().__init__()
+        self._status = status or ""
+        self._requested_command: str | None = None
+
+    @property
+    def requested_command(self) -> str | None:
+        return self._requested_command
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=False, id="home_header")
+        with Container(id="home_screen"):
+            yield Static(HOME_COMMAND_TEXT, id="home_command_text")
+            if self._status:
+                yield Static(self._status, id="home_status")
+            yield Input(
+                value="",
+                placeholder="/open path/to/data.csv",
+                id="home_command_input",
+            )
+            yield Static(
+                "Press Enter to run • Esc or q to quit",
+                id="home_hint",
+            )
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.query_one("#home_command_input", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "home_command_input":
+            return
+        command = event.value.strip()
+        if not command:
+            self.notify("Enter a command to run.")
+            return
+        self._requested_command = command
+        self.exit()
+
+    def action_close(self) -> None:
+        self._requested_command = None
+        self.exit()
+
+    CSS = """
+    HomeLauncherApp {
+        align: left top;
+    }
+    #home_screen {
+        width: 100%;
+        max-width: 100%;
+        padding: 1 1 1 1;
+        layout: vertical;
+        min-height: 28;
+    }
+    #home_command_text {
+        width: 100%;
+        color: $text;
+        padding: 0 1 1 1;
+    }
+    #home_status {
+        width: 100%;
+        color: $text;
+        padding: 0 1 1 1;
+        max-height: 6;
+        overflow-y: auto;
+    }
+    #home_command_input {
+        width: 100%;
+        margin: 0 0 1 0;
+    }
+    #home_hint {
+        width: 100%;
+        color: $text-muted;
+        padding: 1 0 0 0;
     }
     """
 
