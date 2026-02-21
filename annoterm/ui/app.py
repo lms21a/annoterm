@@ -232,7 +232,7 @@ class RowInspectModal(ModalScreen[None]):
                 read_only=True,
                 show_cursor=False,
                 show_line_numbers=False,
-                soft_wrap=False,
+                soft_wrap=True,
                 id="row_inspect_text",
             )
             yield Static(
