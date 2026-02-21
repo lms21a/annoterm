@@ -45,6 +45,7 @@ In the viewer:
 - Press `?` for an on-screen help modal with shortcuts and command reference.
 - Navigation keys: `j/k` (up/down), `ctrl+d/u` (page), `g/G` (top/bottom).
 - Press `Enter` to inspect the row in a popup, then use `Tab` / `Shift+Tab` to cycle columns.
+- In inspect mode, press `Ctrl+C` to copy the currently selected cell value.
 - In row inspect mode, `1..9` also applies quick-label annotations.
 - Press `a` to annotate the current row with any label (new labels are added automatically).
 - Press `t` to open task label mode (shows your current tasks immediately).

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import shlex
+import shutil
+import subprocess
+import sys
 from typing import Any, Callable
 
 import orjson
@@ -27,6 +30,7 @@ h / l: move column
 ctrl+d / ctrl+u: page down / up
 g / G: top / bottom
 Enter: inspect row (Tab / Shift+Tab to move columns)
+In inspect modal, Ctrl+C copies current entry to clipboard.
 
 [b]View Controls[/b]
 /: open filter input
@@ -78,6 +82,62 @@ def _format_value_for_inspector(value: Any) -> str:
     return str(value)
 
 
+def _run_clipboard_command(command: list[str], text: str) -> bool:
+    try:
+        process = subprocess.run(
+            command,
+            input=text,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:
+        return False
+    return process.returncode == 0
+
+
+def _copy_text_to_clipboard(text: str) -> bool:
+    """Try to copy text to the OS clipboard."""
+    if sys.platform == "darwin":
+        if _run_clipboard_command(["pbcopy"], text):
+            return True
+    elif sys.platform == "win32":
+        if _run_clipboard_command(["clip"], text):
+            return True
+    else:
+        for command in (
+            ["wl-copy"],
+            ["xclip", "-selection", "clipboard"],
+            ["xsel", "--clipboard", "--input"],
+        ):
+            if shutil.which(command[0]) is None:
+                continue
+            if _run_clipboard_command(command, text):
+                return True
+
+    try:
+        import tkinter
+    except Exception:
+        return False
+    root = None
+    try:
+        root = tkinter.Tk()
+        root.withdraw()
+        root.clipboard_clear()
+        root.clipboard_append(text)
+        root.update()
+        root.destroy()
+        return True
+    except Exception:
+        try:
+            if root is not None:
+                root.destroy()
+        except Exception:
+            pass
+        return False
+
+
 class HelpModal(ModalScreen[None]):
     """Simple keyboard shortcut and command reference overlay."""
 
@@ -123,6 +183,7 @@ class RowInspectModal(ModalScreen[None]):
         Binding("enter", "close", "Close"),
         Binding("tab,right", "next_column", "Next Column", show=False, priority=True),
         Binding("shift+tab,left", "previous_column", "Prev Column", show=False, priority=True),
+        Binding("ctrl+c", "copy_entry", "Copy Value", show=False, priority=True),
         Binding("home", "first_column", "First Column", show=False, priority=True),
         Binding("end", "last_column", "Last Column", show=False, priority=True),
         Binding("1", "apply_label_1", "Label 1", show=False, priority=True),
@@ -175,7 +236,7 @@ class RowInspectModal(ModalScreen[None]):
                 id="row_inspect_text",
             )
             yield Static(
-                "Tab/Shift+Tab: change column | Enter/Esc/q: close",
+                "Tab/Shift+Tab: change column | Ctrl+C: copy value | Enter/Esc/q: close",
                 id="row_inspect_hint",
             )
 
@@ -203,6 +264,21 @@ class RowInspectModal(ModalScreen[None]):
             return
         self._column_index = (self._column_index - 1) % len(self._columns)
         self._refresh_content()
+
+    def _current_entry_value(self) -> str:
+        if not self._columns:
+            return ""
+        column = self._columns[self._column_index]
+        return _format_value_for_inspector(self._row.row_data.get(column))
+
+    def action_copy_entry(self) -> None:
+        if not self._columns:
+            return
+        value_text = self._current_entry_value()
+        if _copy_text_to_clipboard(value_text):
+            self.notify(f"Copied {self.current_column_name} to clipboard.")
+        else:
+            self.notify("Clipboard not available.", severity="error")
 
     def action_first_column(self) -> None:
         if not self._columns:
@@ -262,18 +338,18 @@ class RowInspectModal(ModalScreen[None]):
         else:
             column = self._columns[self._column_index]
             column_meta = f"Column {self._column_index + 1}/{len(self._columns)}: {column}"
-            value_text = _format_value_for_inspector(self._row.row_data.get(column))
+            value_text = self._current_entry_value()
 
         quick_summary = ", ".join(
             f"{key}:{value}" for key, value in sorted(self._quick_label_map.items())
         )
         if quick_summary:
             hint = (
-                "Tab/Shift+Tab: change column | 1..9: annotate row | "
+                "Tab/Shift+Tab: change column | Ctrl+C: copy value | 1..9: annotate row | "
                 f"labels {quick_summary} | Enter/Esc/q: close"
             )
         else:
-            hint = "Tab/Shift+Tab: change column | Enter/Esc/q: close"
+            hint = "Tab/Shift+Tab: change column | Ctrl+C: copy value | Enter/Esc/q: close"
 
         self.query_one("#row_inspect_title", Static).update(title)
         self.query_one("#row_inspect_column_meta", Static).update(column_meta)
